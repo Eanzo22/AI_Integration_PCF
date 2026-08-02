@@ -59,6 +59,26 @@ interface CommentOutputSnapshot {
     suggestedComment?: string;
 }
 
+interface HeldOutputValue {
+    name: keyof IOutputs;
+    value: string;
+}
+
+interface OutputBindingInfo {
+    name: keyof IOutputs;
+    parameter?: unknown;
+    usage: "bound";
+    value: Date | number | string | undefined;
+}
+
+interface AgentCommentOutputGate {
+    heldOutputs: HeldOutputValue[];
+    released: boolean;
+    releaseScheduled: boolean;
+    sourceAction: string;
+    token: number;
+}
+
 interface XrmGlobalContext {
     getClientUrl?: () => string;
 }
@@ -108,15 +128,33 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     private readonly decisionEscalateToLeadValue = 6;
     private readonly decisionRouteToDepartmentValue = 2;
     private readonly decisionRouteToServiceProviderValue = 1;
+    private readonly agentCommentLogicalName = "ldv_agentcomment";
+    private readonly commentOutputReplayDelaysMs = [250, 1000];
+    private readonly invalidReasonValues: Record<string, number> = {
+        consumerbehavior: 8,
+        extrainforequired: 5,
+        feedbacknotclear: 4,
+        finalbillingapproval: 6,
+        missingdetails: 2,
+        missingdocs: 3,
+        noissuefromspside: 7,
+        processandpolicies: 9,
+        tdrarelated: 10,
+        wrongfeedback: 1
+    };
     private readonly serviceProviderOptionLabelLanguageCode = 1033;
     private readonly serviceProviderGlobalOptionSetName = "ldv_serviceprovider";
     private activeGenerationId = 0;
     private associatedLegalNoteKeys: Record<string, boolean> = {};
     private assessDisputeComment?: string;
+    private boundField?: string;
     private bpfCheckKey?: string;
     private bpfDisabledReason?: string;
     private bpfStageName?: string;
     private commentOutputSnapshot?: CommentOutputSnapshot;
+    private agentCommentOutputGate?: AgentCommentOutputGate;
+    private commentOutputReplayHandles: number[] = [];
+    private commentOutputReplayToken = 0;
     private entitySetNameCache: Record<string, string> = {};
     private notifyOutputChanged: () => void = () => undefined;
     private abortController?: AbortController;
@@ -128,7 +166,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     private feedbackByAI?: string;
     private hasAppliedSuggestionOutputs = false;
     private initialRequestStarted = false;
-    private invalidReason?: string;
+    private invalidReason?: number;
     private isBpfDisabled = false;
     private isLoading = false;
     private lastRunOn?: Date;
@@ -177,6 +215,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             apiEndpoint: this.getApiEndpoint(context),
             hasInputText: Boolean(this.getInputText(context))
         });
+        this.logBoundOutputLogicalNames(context, "init");
         void this.tryInitialGenerate(context);
     }
 
@@ -235,27 +274,37 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
      * @returns an object based on nomenclature defined in manifest, expecting object[s] for property marked as "bound" or "output"
      */
     public getOutputs(): IOutputs {
-        return {
-            decisionByAI: this.decisionByAI,
-            feedbackByAI: this.feedbackByAI,
-            customerCallSuggestionInstructionsByAI: this.customerCallSuggestionInstructionsByAI,
-            validationByAI: this.validationByAI,
-            invalidReason: this.invalidReason,
-            closedInFavorOf: this.closedInFavorOf,
-            routeToSPReasons: this.routeToSPReasons,
-            assessDisputeComment: this.assessDisputeComment,
-            routeToServiceProviderComment: this.routeToServiceProviderComment,
-            routeToDepartmentComment: this.routeToDepartmentComment,
-            escalateToLeadComment: this.escalateToLeadComment,
-            suggestedComment: this.suggestedComment,
-            suggestedDecision: this.suggestedDecision,
-            legalNotesJson: this.legalNotesJson,
-            correlationId: this.suggestionCorrelationId,
-            resultText: this.resultText,
-            resultJson: this.resultJson,
-            statusText: this.statusText,
-            lastRunOn: this.lastRunOn
-        };
+        const outputs: IOutputs = {};
+
+        this.addOutputWithGate(outputs, "BoundField", this.boundField);
+        this.addOutputWithGate(outputs, "decisionByAI", this.decisionByAI);
+        this.addOutputWithGate(outputs, "customerCallSuggestionInstructionsByAI", this.customerCallSuggestionInstructionsByAI);
+        this.addOutputWithGate(outputs, "validationByAI", this.validationByAI);
+        this.addOutputWithGate(outputs, "invalidReason", this.invalidReason);
+        this.addOutputWithGate(outputs, "closedInFavorOf", this.closedInFavorOf);
+        this.addOutputWithGate(outputs, "routeToSPReasons", this.routeToSPReasons);
+        this.addOutputWithGate(outputs, "assessDisputeComment", this.assessDisputeComment);
+        this.addOutputWithGate(outputs, "routeToServiceProviderComment", this.routeToServiceProviderComment);
+        this.addOutputWithGate(outputs, "routeToDepartmentComment", this.routeToDepartmentComment);
+        this.addOutputWithGate(outputs, "escalateToLeadComment", this.escalateToLeadComment);
+        this.addOutputWithGate(outputs, "suggestedComment", this.suggestedComment);
+        this.addOutputWithGate(outputs, "suggestedDecision", this.suggestedDecision);
+        this.addOutputWithGate(outputs, "legalNotesJson", this.legalNotesJson);
+        this.addOutputWithGate(outputs, "correlationId", this.suggestionCorrelationId);
+        this.addOutputWithGate(outputs, "resultText", this.resultText);
+        this.addOutputWithGate(outputs, "resultJson", this.resultJson);
+        this.addOutputWithGate(outputs, "statusText", this.statusText);
+        this.addOutputWithGate(outputs, "lastRunOn", this.lastRunOn);
+        this.addOutputWithGate(outputs, "feedbackByAI", this.feedbackByAI);
+
+        this.log("getOutputs called", {
+            diagnostics: this.getOutputDiagnostics(),
+            heldAgentCommentOutputs: this.agentCommentOutputGate?.heldOutputs.map((output) => output.name),
+            isAgentCommentOutputReleased: this.agentCommentOutputGate?.released,
+            returnedKeys: Object.keys(outputs)
+        });
+
+        return outputs;
     }
 
     /**
@@ -264,6 +313,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
      */
     public destroy(): void {
         this.abortController?.abort();
+        this.clearCommentOutputReplay();
 
         if (this._container) {
             ReactDOM.unmountComponentAtNode(this._container);
@@ -271,6 +321,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     }
 
     private hydrateOutputs(context: ComponentFramework.Context<IInputs>): void {
+        this.boundField = context.parameters.BoundField.raw ?? undefined;
         this.decisionByAI = context.parameters.decisionByAI.raw ?? undefined;
         this.feedbackByAI = context.parameters.feedbackByAI.raw ?? undefined;
         this.customerCallSuggestionInstructionsByAI = context.parameters.customerCallSuggestionInstructionsByAI.raw ?? undefined;
@@ -480,6 +531,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.log("accept clicked", this.toSuggestionLog(suggestion));
         this.captureCommentOutputSnapshot();
         this.applySuggestionToOutputs(suggestion);
+        this.logOutputBindings(context, "accept after apply", suggestion);
+        this.prepareAgentCommentOutputGate(context, suggestion, "accept");
         this.errorMessage = undefined;
         this.isLoading = true;
         this.statusText = "Accepted. Saving suggested fields...";
@@ -529,6 +582,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.log("modify clicked", this.toSuggestionLog(suggestion));
         this.captureCommentOutputSnapshot();
         this.applySuggestionToOutputs(suggestion);
+        this.logOutputBindings(context, "modify after apply", suggestion);
+        this.prepareAgentCommentOutputGate(context, suggestion, "modify");
         this.errorMessage = undefined;
         this.isLoading = true;
         this.statusText = "Modify applied. Associating legal notes...";
@@ -569,6 +624,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.log("reject clicked", {
             pendingResultText: this.pendingResultText
         });
+        this.clearCommentOutputReplay();
         this.clearPendingSuggestion();
         if (this.hasAppliedSuggestionOutputs) {
             this.clearSuggestionOutputs();
@@ -577,6 +633,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         }
         this.errorMessage = undefined;
         this.statusText = "Rejected. Suggested values were discarded.";
+        this.logOutputBindings(context, "reject after clear");
         this.publishState(context);
     }
 
@@ -592,7 +649,9 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.feedbackByAI = feedback;
         this.customerCallSuggestionInstructionsByAI = suggestion.customerCallSuggestionInstructionsByAI ?? "";
         this.validationByAI = shouldApplyAssessOnlyFields ? suggestion.validationByAI?.value : undefined;
-        this.invalidReason = suggestion.invalidReason;
+        this.invalidReason = shouldApplyAssessOnlyFields && this.isInvalidValidation(suggestion)
+            ? suggestion.invalidReason?.value
+            : undefined;
         this.closedInFavorOf = shouldApplyAssessOnlyFields ? suggestion.closedInFavorOf?.value : undefined;
         this.routeToSPReasons = suggestion.routeToSPReasons;
         this.applyDecisionComment(suggestion, feedback);
@@ -676,6 +735,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     }
 
     private clearSuggestionOutputs(): void {
+        this.clearCommentOutputReplay();
         this.assessDisputeComment = undefined;
         this.closedInFavorOf = undefined;
         this.customerCallSuggestionInstructionsByAI = undefined;
@@ -694,6 +754,165 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.suggestedDecision = undefined;
         this.suggestionCorrelationId = undefined;
         this.validationByAI = undefined;
+    }
+
+    private prepareAgentCommentOutputGate(
+        context: ComponentFramework.Context<IInputs>,
+        suggestion: PendingSuggestion,
+        sourceAction: string
+    ): void {
+        this.clearCommentOutputReplay(false);
+        const heldOutputs = this.getAgentCommentHeldOutputs(context, suggestion);
+
+        if (heldOutputs.length === 0) {
+            this.log("agent comment output gate skipped", {
+                selectedCommentOutput: this.getDecisionCommentOutputName(suggestion),
+                sourceAction
+            });
+            return;
+        }
+
+        this.commentOutputReplayToken += 1;
+
+        this.agentCommentOutputGate = {
+            heldOutputs,
+            released: false,
+            releaseScheduled: false,
+            sourceAction,
+            token: this.commentOutputReplayToken
+        };
+
+        this.log("agent comment output gate prepared", {
+            heldOutputs: heldOutputs.map((output) => output.name),
+            sourceAction
+        });
+    }
+
+    private clearCommentOutputReplay(incrementToken = true): void {
+        this.commentOutputReplayHandles.forEach((handle) => window.clearTimeout(handle));
+        this.commentOutputReplayHandles = [];
+        this.agentCommentOutputGate = undefined;
+
+        if (incrementToken) {
+            this.commentOutputReplayToken += 1;
+        }
+    }
+
+    private getAgentCommentHeldOutputs(
+        context: ComponentFramework.Context<IInputs>,
+        suggestion: AdvisorSuggestionViewModel
+    ): HeldOutputValue[] {
+        const bindings = this.getOutputBindings(context);
+        const selectedCommentOutput = this.getDecisionCommentOutputName(suggestion) as keyof IOutputs | undefined;
+        const bindingsWithLogicalNames = bindings.filter((binding) => Boolean(this.getBoundLogicalName(binding.parameter)));
+        const agentCommentBindings = bindings.filter((binding) =>
+            this.isAgentCommentBinding(binding)
+                && typeof binding.value === "string"
+                && Boolean(binding.value)
+        );
+        const selectedAgentCommentBinding = selectedCommentOutput
+            ? agentCommentBindings.find((binding) => binding.name === selectedCommentOutput)
+            : undefined;
+        const heldBindings = selectedAgentCommentBinding
+            ? [
+                selectedAgentCommentBinding,
+                ...agentCommentBindings.filter((binding) => binding.name !== selectedAgentCommentBinding.name)
+            ]
+            : agentCommentBindings;
+
+        if (heldBindings.length > 0) {
+            return this.toUniqueHeldOutputs(heldBindings);
+        }
+
+        if (selectedCommentOutput && bindingsWithLogicalNames.length === 0) {
+            const selectedBinding = bindings.find((binding) => binding.name === selectedCommentOutput);
+
+            if (selectedBinding && typeof selectedBinding.value === "string" && selectedBinding.value) {
+                return this.toUniqueHeldOutputs([selectedBinding]);
+            }
+        }
+
+        return [];
+    }
+
+    private toUniqueHeldOutputs(bindings: OutputBindingInfo[]): HeldOutputValue[] {
+        return bindings.reduce<HeldOutputValue[]>((heldOutputs, binding) => {
+            if (heldOutputs.some((output) => output.name === binding.name) || typeof binding.value !== "string" || !binding.value) {
+                return heldOutputs;
+            }
+
+            heldOutputs.push({
+                name: binding.name,
+                value: binding.value
+            });
+
+            return heldOutputs;
+        }, []);
+    }
+
+    private isAgentCommentBinding(binding: OutputBindingInfo): boolean {
+        return this.normalizeLogicalName(this.getBoundLogicalName(binding.parameter)) === this.agentCommentLogicalName;
+    }
+
+    private normalizeLogicalName(logicalName: string | undefined): string | undefined {
+        return logicalName?.trim().toLowerCase();
+    }
+
+    private getHeldAgentCommentOutput<TKey extends keyof IOutputs>(
+        key: TKey,
+        value: IOutputs[TKey]
+    ): HeldOutputValue | undefined {
+        if (!this.agentCommentOutputGate || this.agentCommentOutputGate.released) {
+            return undefined;
+        }
+
+        return this.agentCommentOutputGate.heldOutputs.find((output) => output.name === key && output.value === value);
+    }
+
+    private scheduleAgentCommentOutputRelease(): void {
+        const gate = this.agentCommentOutputGate;
+
+        if (!gate || gate.releaseScheduled) {
+            return;
+        }
+
+        gate.releaseScheduled = true;
+        this.commentOutputReplayHandles = this.commentOutputReplayDelaysMs.map((delayMs) => window.setTimeout(() => {
+            const currentGate = this.agentCommentOutputGate;
+
+            if (currentGate?.token !== gate.token) {
+                return;
+            }
+
+            currentGate.released = true;
+            this.log("agent comment output released", {
+                delayMs,
+                heldOutputs: currentGate.heldOutputs.map((output) => output.name),
+                sourceAction: currentGate.sourceAction
+            });
+            this.notifyOutputChanged();
+        }, delayMs));
+
+        this.log("agent comment output release scheduled", {
+            delaysMs: this.commentOutputReplayDelaysMs,
+            heldOutputs: gate.heldOutputs.map((output) => output.name),
+            sourceAction: gate.sourceAction
+        });
+    }
+
+    private getCommentOutputValue(outputName: string): string | undefined {
+        switch (outputName) {
+            case "assessDisputeComment":
+                return this.assessDisputeComment;
+            case "routeToServiceProviderComment":
+                return this.routeToServiceProviderComment;
+            case "routeToDepartmentComment":
+                return this.routeToDepartmentComment;
+            case "escalateToLeadComment":
+                return this.escalateToLeadComment;
+            default:
+                return undefined;
+        }
     }
 
     private async saveAcceptedOutputs(
@@ -740,7 +959,6 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         const shouldSaveAssessOnlyFields = this.isAssessCaseDecision(suggestion);
 
         this.addBoundOptionSetValue(payload, context.parameters.decisionByAI, this.decisionByAI);
-        this.addBoundTextValue(payload, context.parameters.feedbackByAI, this.feedbackByAI);
         this.addBoundTextValue(
             payload,
             context.parameters.customerCallSuggestionInstructionsByAI,
@@ -750,7 +968,9 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             this.addBoundOptionSetValue(payload, context.parameters.validationByAI, this.validationByAI);
         }
 
-        this.addBoundTextValue(payload, context.parameters.invalidReason, this.invalidReason);
+        if (shouldSaveAssessOnlyFields && this.isInvalidValidation(suggestion)) {
+            this.addBoundOptionSetValue(payload, context.parameters.invalidReason, this.invalidReason);
+        }
 
         if (shouldSaveAssessOnlyFields) {
             this.addBoundOptionSetValue(payload, context.parameters.closedInFavorOf, this.closedInFavorOf);
@@ -764,6 +984,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.addBoundTextValue(payload, context.parameters.correlationId, this.suggestionCorrelationId);
         this.addBoundTextValue(payload, context.parameters.resultText, this.resultText);
         this.addBoundTextValue(payload, context.parameters.resultJson, this.resultJson);
+        this.addBoundTextValue(payload, context.parameters.feedbackByAI, this.feedbackByAI);
 
         return payload;
     }
@@ -795,6 +1016,144 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         if (this.isEscalateToLeadDecision(suggestion)) {
             this.addBoundTextValue(payload, context.parameters.escalateToLeadComment, this.escalateToLeadComment);
         }
+    }
+
+    private addOutput<TKey extends keyof IOutputs>(
+        outputs: IOutputs,
+        key: TKey,
+        value: IOutputs[TKey]
+    ): void {
+        if (value !== undefined) {
+            outputs[key] = value;
+        }
+    }
+
+    private addOutputWithGate<TKey extends keyof IOutputs>(
+        outputs: IOutputs,
+        key: TKey,
+        value: IOutputs[TKey]
+    ): void {
+        const heldOutput = this.getHeldAgentCommentOutput(key, value);
+
+        if (heldOutput) {
+            this.scheduleAgentCommentOutputRelease();
+            this.log("agent comment output held from first packet", {
+                outputName: heldOutput.name,
+                valuePreview: this.formatLogPreview(heldOutput.value)
+            });
+            return;
+        }
+
+        this.addOutput(outputs, key, value);
+    }
+
+    private logBoundOutputLogicalNames(context: ComponentFramework.Context<IInputs>, stage: string): void {
+        this.log(`bound output logical names: ${stage}`, this.getOutputBindings(context).reduce<Record<string, unknown>>(
+            (diagnostics, binding) => {
+                diagnostics[binding.name] = {
+                    hasAttributes: Boolean(this.readJsonPath(binding.parameter, "attributes")),
+                    logicalName: this.getBoundLogicalName(binding.parameter),
+                    parameterType: this.readString(binding.parameter, ["type"]),
+                    usage: binding.usage
+                };
+                return diagnostics;
+            },
+            {}
+        ));
+    }
+
+    private logOutputBindings(
+        context: ComponentFramework.Context<IInputs>,
+        stage: string,
+        suggestion?: AdvisorSuggestionViewModel
+    ): void {
+        this.log(`output binding diagnostics: ${stage}`, {
+            bindings: this.getOutputBindings(context).reduce<Record<string, unknown>>((diagnostics, binding) => {
+                diagnostics[binding.name] = {
+                    boundLogicalName: this.getBoundLogicalName(binding.parameter),
+                    hasAttributes: Boolean(this.readJsonPath(binding.parameter, "attributes")),
+                    output: this.getValueDiagnostics(binding.value),
+                    parameterType: this.readString(binding.parameter, ["type"]),
+                    raw: this.getValueDiagnostics(this.readJsonPath(binding.parameter, "raw")),
+                    usage: binding.usage
+                };
+                return diagnostics;
+            }, {}),
+            decisionLabel: suggestion ? this.getDecisionLabel(suggestion) : undefined,
+            decisionValue: suggestion?.decisionByAI?.value,
+            selectedCommentOutput: suggestion ? this.getDecisionCommentOutputName(suggestion) : undefined
+        });
+    }
+
+    private getOutputDiagnostics(): Record<string, unknown> {
+        return this.getOutputBindings().reduce<Record<string, unknown>>((diagnostics, binding) => {
+            diagnostics[binding.name] = this.getValueDiagnostics(binding.value);
+            return diagnostics;
+        }, {});
+    }
+
+    private getOutputBindings(context?: ComponentFramework.Context<IInputs>): OutputBindingInfo[] {
+        return [
+            { name: "BoundField", parameter: context?.parameters.BoundField, usage: "bound", value: this.boundField },
+            { name: "decisionByAI", parameter: context?.parameters.decisionByAI, usage: "bound", value: this.decisionByAI },
+            {
+                name: "customerCallSuggestionInstructionsByAI",
+                parameter: context?.parameters.customerCallSuggestionInstructionsByAI,
+                usage: "bound",
+                value: this.customerCallSuggestionInstructionsByAI
+            },
+            { name: "validationByAI", parameter: context?.parameters.validationByAI, usage: "bound", value: this.validationByAI },
+            { name: "invalidReason", parameter: context?.parameters.invalidReason, usage: "bound", value: this.invalidReason },
+            { name: "closedInFavorOf", parameter: context?.parameters.closedInFavorOf, usage: "bound", value: this.closedInFavorOf },
+            { name: "routeToSPReasons", parameter: context?.parameters.routeToSPReasons, usage: "bound", value: this.routeToSPReasons },
+            { name: "assessDisputeComment", parameter: context?.parameters.assessDisputeComment, usage: "bound", value: this.assessDisputeComment },
+            {
+                name: "routeToServiceProviderComment",
+                parameter: context?.parameters.routeToServiceProviderComment,
+                usage: "bound",
+                value: this.routeToServiceProviderComment
+            },
+            { name: "routeToDepartmentComment", parameter: context?.parameters.routeToDepartmentComment, usage: "bound", value: this.routeToDepartmentComment },
+            { name: "escalateToLeadComment", parameter: context?.parameters.escalateToLeadComment, usage: "bound", value: this.escalateToLeadComment },
+            { name: "suggestedComment", parameter: context?.parameters.suggestedComment, usage: "bound", value: this.suggestedComment },
+            { name: "suggestedDecision", parameter: context?.parameters.suggestedDecision, usage: "bound", value: this.suggestedDecision },
+            { name: "legalNotesJson", parameter: context?.parameters.legalNotesJson, usage: "bound", value: this.legalNotesJson },
+            { name: "correlationId", parameter: context?.parameters.correlationId, usage: "bound", value: this.suggestionCorrelationId },
+            { name: "resultText", parameter: context?.parameters.resultText, usage: "bound", value: this.resultText },
+            { name: "resultJson", parameter: context?.parameters.resultJson, usage: "bound", value: this.resultJson },
+            { name: "statusText", parameter: context?.parameters.statusText, usage: "bound", value: this.statusText },
+            { name: "lastRunOn", parameter: context?.parameters.lastRunOn, usage: "bound", value: this.lastRunOn },
+            { name: "feedbackByAI", parameter: context?.parameters.feedbackByAI, usage: "bound", value: this.feedbackByAI }
+        ];
+    }
+
+    private getValueDiagnostics(value: unknown): Record<string, unknown> {
+        const textValue = value instanceof Date ? value.toISOString() : value;
+        const preview = this.formatLogPreview(textValue);
+
+        return {
+            hasValue: value !== undefined && value !== null && value !== "",
+            length: typeof textValue === "string" ? textValue.length : undefined,
+            preview,
+            type: value instanceof Date ? "Date" : typeof value
+        };
+    }
+
+    private getBoundLogicalName(parameter: unknown): string | undefined {
+        return this.readString(parameter, ["attributes.LogicalName", "attributes.logicalName"]);
+    }
+
+    private formatLogPreview(value: unknown): string | number | boolean | undefined {
+        if (value === undefined || value === null) {
+            return undefined;
+        }
+
+        if (typeof value === "number" || typeof value === "boolean") {
+            return value;
+        }
+
+        const textValue = typeof value === "string" ? value : JSON.stringify(value);
+        return textValue.length > 120 ? `${textValue.slice(0, 120)}...` : textValue;
     }
 
     private async associateLegalNotesToCurrentRecord(
@@ -1635,6 +1994,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             "validation",
             "Validation"
         ]);
+        const invalidReason = this.readInvalidReason(candidate);
         const closedInFavorOf = this.readOptionSetItemFromValueAndLabel(candidate, "CloseInFavorOfValue", "CloseInFavorOf")
             ?? this.readOptionSetItemFromValueAndLabel(candidate, "CloseInFavorOfValue", "CloseinFavorOf")
             ?? this.readOptionSetItem(candidate, [
@@ -1698,7 +2058,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             decisionByAI,
             validationByAI,
             feedbackByAI,
-            invalidReason: this.readString(candidate, ["invalidReason", "InvalidReason", "invalid_reason"]),
+            invalidReason,
             legalNotes,
             policyReference: this.readString(candidate, ["policyReference", "policy_reference", "policy"]),
             reasoning: this.readString(candidate, [
@@ -2143,6 +2503,49 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         };
     }
 
+    private readInvalidReason(data: unknown): OptionSetItemViewModel | undefined {
+        const invalidReason = this.readOptionSetItemFromValueAndLabel(data, "InvalidReasonValue", "InvalidReason")
+            ?? this.readOptionSetItemFromValueAndLabel(data, "invalidReasonValue", "invalidReason")
+            ?? this.readOptionSetItemFromValueAndLabel(data, "InvalidReasonValue", "invalid_reason")
+            ?? this.readOptionSetItem(data, [
+                "invalidReason",
+                "InvalidReason",
+                "invalidReasonValue",
+                "InvalidReasonValue",
+                "invalid_reason",
+                "Invalid_Reason"
+            ]);
+
+        if (!invalidReason) {
+            return undefined;
+        }
+
+        if (invalidReason.value !== undefined) {
+            return invalidReason;
+        }
+
+        const mappedValue = this.mapInvalidReasonLabelToValue(invalidReason.label);
+
+        return mappedValue === undefined
+            ? invalidReason
+            : {
+                ...invalidReason,
+                value: mappedValue
+            };
+    }
+
+    private mapInvalidReasonLabelToValue(label: string | undefined): number | undefined {
+        if (!label) {
+            return undefined;
+        }
+
+        return this.invalidReasonValues[this.normalizeLookupKey(label)];
+    }
+
+    private normalizeLookupKey(value: string): string {
+        return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+    }
+
     private normalizeOptionSetItem(value: unknown): OptionSetItemViewModel | undefined {
         if (typeof value === "number") {
             return { value };
@@ -2203,6 +2606,16 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         return false;
     }
 
+    private isInvalidValidation(suggestion: AdvisorSuggestionViewModel): boolean {
+        const validationLabel = suggestion.validationByAI?.label?.toLowerCase();
+
+        if (validationLabel) {
+            return validationLabel.includes("invalid");
+        }
+
+        return suggestion.validationByAI?.value !== undefined && suggestion.validationByAI.value !== 1;
+    }
+
     private isRouteToServiceProviderDecision(suggestion: AdvisorSuggestionViewModel): boolean {
         if (suggestion.decisionByAI?.value === this.decisionRouteToServiceProviderValue) {
             return true;
@@ -2236,6 +2649,26 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         const decisionLabel = this.getDecisionLabel(suggestion);
 
         return Boolean(decisionLabel?.includes("escalate") && decisionLabel.includes("lead"));
+    }
+
+    private getDecisionCommentOutputName(suggestion: AdvisorSuggestionViewModel): string | undefined {
+        if (this.isAssessCaseDecision(suggestion)) {
+            return "assessDisputeComment";
+        }
+
+        if (this.isRouteToServiceProviderDecision(suggestion)) {
+            return "routeToServiceProviderComment";
+        }
+
+        if (this.isRouteToDepartmentDecision(suggestion)) {
+            return "routeToDepartmentComment";
+        }
+
+        if (this.isEscalateToLeadDecision(suggestion)) {
+            return "escalateToLeadComment";
+        }
+
+        return undefined;
     }
 
     private getDecisionLabel(suggestion: AdvisorSuggestionViewModel): string | undefined {

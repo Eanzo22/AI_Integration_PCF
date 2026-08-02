@@ -36,7 +36,7 @@ export interface AdvisorSuggestionViewModel {
   decisionByAI?: OptionSetItemViewModel;
   feedbackByAI?: string;
   generatedOn?: string;
-  invalidReason?: string;
+  invalidReason?: OptionSetItemViewModel;
   legalNotes: LegalNoteViewModel[];
   policyReference?: string;
   requestId?: string;
@@ -274,7 +274,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
           ) : null}
         </div>
 
-        {hasAcceptedResult ? (
+        {hasAcceptedResult && this.props.isDevelopment  ? (
           <span className="ai-advisor__accepted">
             Current values: {this.formatAcceptedSummary()}
           </span>
@@ -396,7 +396,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
     }
 
     return [
-      suggestion.invalidReason ? `Invalid Reason: ${suggestion.invalidReason}` : undefined,
+      suggestion.invalidReason ? `Invalid Reason: ${this.formatOptionSetItem(suggestion.invalidReason)}` : undefined,
       suggestion.routeToSPReasons ? `Route to SP Reasons: ${suggestion.routeToSPReasons}` : undefined
     ].filter(Boolean).join("\n");
   }
