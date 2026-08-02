@@ -68,7 +68,7 @@ interface OutputBindingInfo {
     name: keyof IOutputs;
     parameter?: unknown;
     usage: "bound";
-    value: Date | number | string | undefined;
+    value: OutputValue;
 }
 
 interface AgentCommentOutputGate {
@@ -78,6 +78,11 @@ interface AgentCommentOutputGate {
     sourceAction: string;
     token: number;
 }
+
+type OutputValue = Date | number | string | undefined;
+type RejectOutputValue = Date | number | string | null;
+type OutputSnapshot = Partial<Record<keyof IOutputs, OutputValue>>;
+type RejectOutputPacket = Partial<Record<keyof IOutputs, RejectOutputValue>>;
 
 interface XrmGlobalContext {
     getClientUrl?: () => string;
@@ -132,6 +137,26 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     private readonly commentOutputReplayDelaysMs = [250, 1000];
     private readonly initialGenerateRecordKeyStateName = "initialGenerateRecordKey";
     private readonly initialGenerateStartedStateName = "initialGenerateStarted";
+    private readonly rejectRestorableOutputNames: (keyof IOutputs)[] = [
+        "decisionByAI",
+        "customerCallSuggestionInstructionsByAI",
+        "validationByAI",
+        "invalidReason",
+        "closedInFavorOf",
+        "routeToSPReasons",
+        "assessDisputeComment",
+        "routeToServiceProviderComment",
+        "routeToDepartmentComment",
+        "escalateToLeadComment",
+        "suggestedComment",
+        "suggestedDecision",
+        "legalNotesJson",
+        "correlationId",
+        "resultText",
+        "resultJson",
+        "lastRunOn",
+        "feedbackByAI"
+    ];
     private readonly invalidReasonValues: Record<string, number> = {
         consumerbehavior: 8,
         extrainforequired: 5,
@@ -155,8 +180,10 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     private bpfStageName?: string;
     private commentOutputSnapshot?: CommentOutputSnapshot;
     private agentCommentOutputGate?: AgentCommentOutputGate;
+    private appliedOutputSnapshot?: OutputSnapshot;
     private commentOutputReplayHandles: number[] = [];
     private commentOutputReplayToken = 0;
+    private rejectOutputPacket?: RejectOutputPacket;
     private controlState: ComponentFramework.Dictionary = {};
     private entitySetNameCache: Record<string, string> = {};
     private notifyOutputChanged: () => void = () => undefined;
@@ -282,6 +309,16 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
      * @returns an object based on nomenclature defined in manifest, expecting object[s] for property marked as "bound" or "output"
      */
     public getOutputs(): IOutputs {
+        const rejectOutputPacket = this.consumeRejectOutputPacket();
+
+        if (rejectOutputPacket) {
+            this.log("getOutputs called: reject restore packet", {
+                diagnostics: this.getOutputPacketDiagnostics(rejectOutputPacket),
+                returnedKeys: Object.keys(rejectOutputPacket)
+            });
+            return rejectOutputPacket as IOutputs;
+        }
+
         const outputs: IOutputs = {};
 
         this.addOutputWithGate(outputs, "BoundField", this.boundField);
@@ -437,6 +474,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         const method = this.getMethod(context);
         const identifiers = this.createRequestIdentifiers();
         const generationId = this.activeGenerationId + 1;
+        this.rejectOutputPacket = undefined;
 
         if (!await this.refreshBpfGate(context, true)) {
             this.publishState(context);
@@ -580,7 +618,9 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
 
         const suggestion = this.pendingSuggestion;
         this.log("accept clicked", this.toSuggestionLog(suggestion));
+        this.rejectOutputPacket = undefined;
         this.captureCommentOutputSnapshot();
+        this.captureAppliedOutputSnapshot(context);
         this.applySuggestionToOutputs(suggestion);
         this.logOutputBindings(context, "accept after apply", suggestion);
         this.prepareAgentCommentOutputGate(context, suggestion, "accept");
@@ -595,6 +635,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             if (saveResult.saved) {
                 this.clearPendingSuggestion();
                 this.commentOutputSnapshot = undefined;
+                this.appliedOutputSnapshot = undefined;
                 this.hasAppliedSuggestionOutputs = false;
             }
 
@@ -631,7 +672,9 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
 
         const suggestion = this.pendingSuggestion;
         this.log("modify clicked", this.toSuggestionLog(suggestion));
+        this.rejectOutputPacket = undefined;
         this.captureCommentOutputSnapshot();
+        this.captureAppliedOutputSnapshot(context);
         this.applySuggestionToOutputs(suggestion);
         this.logOutputBindings(context, "modify after apply", suggestion);
         this.prepareAgentCommentOutputGate(context, suggestion, "modify");
@@ -678,8 +721,9 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.clearCommentOutputReplay();
         this.clearPendingSuggestion();
         if (this.hasAppliedSuggestionOutputs) {
+            this.prepareRejectOutputPacket();
             this.clearSuggestionOutputs();
-            this.restoreCommentOutputSnapshot();
+            this.restoreAppliedOutputSnapshot();
             this.hasAppliedSuggestionOutputs = false;
         }
         this.errorMessage = undefined;
@@ -754,6 +798,17 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.pendingResultJson = undefined;
     }
 
+    private captureAppliedOutputSnapshot(context: ComponentFramework.Context<IInputs>): void {
+        if (this.hasAppliedSuggestionOutputs && this.appliedOutputSnapshot) {
+            return;
+        }
+
+        this.appliedOutputSnapshot = this.rejectRestorableOutputNames.reduce<OutputSnapshot>((snapshot, outputName) => {
+            snapshot[outputName] = this.getCurrentBoundOutputValue(context, outputName);
+            return snapshot;
+        }, {});
+    }
+
     private captureCommentOutputSnapshot(): void {
         if (this.hasAppliedSuggestionOutputs && this.commentOutputSnapshot) {
             return;
@@ -768,6 +823,62 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             routeToServiceProviderComment: this.routeToServiceProviderComment,
             suggestedComment: this.suggestedComment
         };
+    }
+
+    private prepareRejectOutputPacket(): void {
+        if (!this.appliedOutputSnapshot) {
+            this.rejectOutputPacket = undefined;
+            return;
+        }
+
+        // CRM leaves omitted outputs untouched, so Reject sends one explicit undo packet.
+        this.rejectOutputPacket = this.rejectRestorableOutputNames.reduce<RejectOutputPacket>((packet, outputName) => {
+            const snapshotValue = this.appliedOutputSnapshot?.[outputName];
+            packet[outputName] = snapshotValue ?? null;
+            return packet;
+        }, {});
+
+        this.log("reject output packet prepared", {
+            diagnostics: this.getOutputPacketDiagnostics(this.rejectOutputPacket)
+        });
+    }
+
+    private consumeRejectOutputPacket(): RejectOutputPacket | undefined {
+        const packet = this.rejectOutputPacket;
+        this.rejectOutputPacket = undefined;
+
+        return packet;
+    }
+
+    private restoreAppliedOutputSnapshot(): void {
+        const snapshot = this.appliedOutputSnapshot;
+
+        if (!snapshot) {
+            this.restoreCommentOutputSnapshot();
+            return;
+        }
+
+        this.decisionByAI = snapshot.decisionByAI as number | undefined;
+        this.customerCallSuggestionInstructionsByAI = snapshot.customerCallSuggestionInstructionsByAI as string | undefined;
+        this.validationByAI = snapshot.validationByAI as number | undefined;
+        this.invalidReason = snapshot.invalidReason as number | undefined;
+        this.closedInFavorOf = snapshot.closedInFavorOf as number | undefined;
+        this.routeToSPReasons = snapshot.routeToSPReasons as string | undefined;
+        this.assessDisputeComment = snapshot.assessDisputeComment as string | undefined;
+        this.routeToServiceProviderComment = snapshot.routeToServiceProviderComment as string | undefined;
+        this.routeToDepartmentComment = snapshot.routeToDepartmentComment as string | undefined;
+        this.escalateToLeadComment = snapshot.escalateToLeadComment as string | undefined;
+        this.suggestedComment = snapshot.suggestedComment as string | undefined;
+        this.suggestedDecision = snapshot.suggestedDecision as string | undefined;
+        this.legalNotesJson = snapshot.legalNotesJson as string | undefined;
+        this.suggestionCorrelationId = snapshot.correlationId as string | undefined;
+        this.resultText = snapshot.resultText as string | undefined;
+        this.resultJson = snapshot.resultJson as string | undefined;
+        this.lastRunOn = snapshot.lastRunOn as Date | undefined;
+        this.feedbackByAI = snapshot.feedbackByAI as string | undefined;
+
+        this.appliedOutputSnapshot = undefined;
+        this.commentOutputSnapshot = undefined;
     }
 
     private restoreCommentOutputSnapshot(): void {
@@ -1141,6 +1252,27 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             diagnostics[binding.name] = this.getValueDiagnostics(binding.value);
             return diagnostics;
         }, {});
+    }
+
+    private getOutputPacketDiagnostics(packet: RejectOutputPacket): Record<string, unknown> {
+        return Object.keys(packet).reduce<Record<string, unknown>>((diagnostics, outputName) => {
+            diagnostics[outputName] = this.getValueDiagnostics(packet[outputName as keyof IOutputs]);
+            return diagnostics;
+        }, {});
+    }
+
+    private getCurrentBoundOutputValue(
+        context: ComponentFramework.Context<IInputs>,
+        outputName: keyof IOutputs
+    ): OutputValue {
+        const parameters = context.parameters as IInputs & Record<keyof IOutputs, { raw?: unknown } | undefined>;
+        const value = parameters[outputName]?.raw;
+
+        if (value instanceof Date || typeof value === "number" || typeof value === "string") {
+            return value;
+        }
+
+        return undefined;
     }
 
     private getOutputBindings(context?: ComponentFramework.Context<IInputs>): OutputBindingInfo[] {
