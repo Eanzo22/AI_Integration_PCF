@@ -130,6 +130,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     private readonly decisionRouteToServiceProviderValue = 1;
     private readonly agentCommentLogicalName = "ldv_agentcomment";
     private readonly commentOutputReplayDelaysMs = [250, 1000];
+    private readonly initialGenerateRecordKeyStateName = "initialGenerateRecordKey";
+    private readonly initialGenerateStartedStateName = "initialGenerateStarted";
     private readonly invalidReasonValues: Record<string, number> = {
         consumerbehavior: 8,
         extrainforequired: 5,
@@ -155,6 +157,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     private agentCommentOutputGate?: AgentCommentOutputGate;
     private commentOutputReplayHandles: number[] = [];
     private commentOutputReplayToken = 0;
+    private controlState: ComponentFramework.Dictionary = {};
     private entitySetNameCache: Record<string, string> = {};
     private notifyOutputChanged: () => void = () => undefined;
     private abortController?: AbortController;
@@ -168,6 +171,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     private initialRequestStarted = false;
     private invalidReason?: number;
     private isBpfDisabled = false;
+    private isDevelopmentMode = false;
     private isLoading = false;
     private lastRunOn?: Date;
     private legalNotesJson?: string;
@@ -208,6 +212,9 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         container: HTMLDivElement
     ): void {
         this.notifyOutputChanged = notifyOutputChanged;
+        this.controlState = state ?? {};
+        this.isDevelopmentMode = this.getIsDevelopment(context);
+        this.initialRequestStarted = this.hasInitialGenerateStartedForRecord(context);
         context.mode.trackContainerResize(true);
         this.hydrateOutputs(context);
         this._container = container;
@@ -225,6 +232,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
      * @returns ReactElement root react element for the control
      */
     public updateView(context: ComponentFramework.Context<IInputs>): void {
+        this.isDevelopmentMode = this.getIsDevelopment(context);
         const sourceValue = context.parameters.inputValue.raw ?? "";
         const apiEndpoint = this.getApiEndpoint(context);
 
@@ -343,9 +351,52 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.lastRunOn = context.parameters.lastRunOn.raw ?? undefined;
     }
 
+    private getInitialGenerateRecordKey(context: ComponentFramework.Context<IInputs>): string | undefined {
+        const contextInfo = this.getContextInfo(context);
+        const entityName = contextInfo?.entityTypeName?.trim().toLowerCase();
+        const recordId = this.cleanGuid(contextInfo?.entityId ?? "").toLowerCase();
+
+        return entityName && recordId ? `${entityName}:${recordId}` : undefined;
+    }
+
+    private hasInitialGenerateStartedForRecord(context: ComponentFramework.Context<IInputs>): boolean {
+        const recordKey = this.getInitialGenerateRecordKey(context);
+
+        return Boolean(
+            recordKey
+                && this.controlState[this.initialGenerateRecordKeyStateName] === recordKey
+                && this.controlState[this.initialGenerateStartedStateName] === true
+        );
+    }
+
+    private markInitialGenerateStarted(context: ComponentFramework.Context<IInputs>): void {
+        const recordKey = this.getInitialGenerateRecordKey(context);
+        this.initialRequestStarted = true;
+
+        if (!recordKey) {
+            this.log("initial generate state not persisted: missing record key");
+            return;
+        }
+
+        this.controlState = {
+            ...this.controlState,
+            [this.initialGenerateRecordKeyStateName]: recordKey,
+            [this.initialGenerateStartedStateName]: true
+        };
+
+        const saved = context.mode.setControlState(this.controlState);
+        this.log("initial generate state persisted", {
+            recordKey,
+            saved
+        });
+    }
+
     private async tryInitialGenerate(context: ComponentFramework.Context<IInputs>): Promise<void> {
-        if (this.initialRequestStarted || this.isLoading) {
+        const hasInitialGenerateStartedForRecord = this.hasInitialGenerateStartedForRecord(context);
+
+        if (this.initialRequestStarted || this.isLoading || hasInitialGenerateStartedForRecord) {
             this.log("initial generate skipped", {
+                hasInitialGenerateStartedForRecord,
                 initialRequestStarted: this.initialRequestStarted,
                 isLoading: this.isLoading
             });
@@ -373,7 +424,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             return;
         }
 
-        this.initialRequestStarted = true;
+        this.markInitialGenerateStarted(context);
         this.log("initial generate started", {
             apiEndpoint,
             inputTextLength: this.getInputText(context).length
@@ -2804,6 +2855,10 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     }
 
     private log(message: string, data?: unknown): void {
+        if (!this.isDevelopmentMode) {
+            return;
+        }
+
         if (data === undefined) {
             console.log(`[ApiFieldMapper] ${message}`);
             return;
