@@ -88,7 +88,17 @@ interface XrmGlobalContext {
     getClientUrl?: () => string;
 }
 
+interface XrmPage {
+    data?: {
+        refresh?: (save?: boolean) => PromiseLike<void> | void;
+    };
+    ui?: {
+        refreshRibbon?: (refreshAll?: boolean) => void;
+    };
+}
+
 interface XrmGlobal {
+    Page?: XrmPage;
     Utility?: {
         getGlobalContext?: () => XrmGlobalContext;
     };
@@ -252,7 +262,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             hasInputText: Boolean(this.getInputText(context))
         });
         this.logBoundOutputLogicalNames(context, "init");
-        void this.tryInitialGenerate(context);
+        this.log("initial generate disabled");
     }
 
     /**
@@ -704,6 +714,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             const saveResult = await this.saveAcceptedOutputs(context, suggestion);
 
             if (saveResult.saved) {
+                await this.tryUnsupportedFormRefresh(context, "accept");
                 this.clearPendingSuggestion();
                 this.commentOutputSnapshot = undefined;
                 this.appliedOutputSnapshot = undefined;
@@ -758,6 +769,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         try {
             const associatedCount = await this.associateLegalNotesToCurrentRecord(context, suggestion);
             const savedReviewState = await this.saveReservedReviewState(context);
+            await this.tryUnsupportedFormRefresh(context, "modify");
             this.statusText = associatedCount > 0
                 ? `Modify applied. ${associatedCount} legal note(s) associated to the Case.`
                 : "Modify applied. Review the returned AI data and edit the form fields before saving.";
@@ -814,6 +826,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
 
         try {
             await this.saveReservedReviewState(context);
+            await this.tryUnsupportedFormRefresh(context, "reject");
         } catch (error) {
             this.log("reject reserved review state save failed", {
                 error: (error as Error).message
@@ -2080,6 +2093,15 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         ].some((value) => this.parseBooleanInput(value));
     }
 
+    private getAllowUnsupportedFormRefresh(context: ComponentFramework.Context<IInputs>): boolean {
+        const parameters = context.parameters as IInputs & Record<string, { raw?: unknown } | undefined>;
+
+        return [
+            parameters.allowUnsupportedFormRefresh?.raw,
+            parameters.allowunsupportedformrefresh?.raw
+        ].some((value) => this.parseBooleanInput(value));
+    }
+
     private getBpfEntityName(context: ComponentFramework.Context<IInputs>): string {
         return context.parameters.bpfEntityName.raw?.trim() ?? "ldv_bpf_c7bfac2f19d840fdafbbe0bcafa3b206";
     }
@@ -2844,6 +2866,45 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         return clientUrl?.replace(/\/$/, "");
     }
 
+    private async tryUnsupportedFormRefresh(
+        context: ComponentFramework.Context<IInputs>,
+        actionName: string
+    ): Promise<void> {
+        if (!this.getAllowUnsupportedFormRefresh(context)) {
+            this.log("unsupported form refresh skipped: flag disabled", {
+                actionName
+            });
+            return;
+        }
+
+        const xrmPage = this.getXrmPage();
+
+        if (!xrmPage?.data?.refresh) {
+            this.log("unsupported form refresh skipped: Xrm.Page unavailable", {
+                actionName
+            });
+            return;
+        }
+
+        try {
+            const refreshResult = xrmPage.data.refresh(false);
+
+            if (this.isPromiseLike(refreshResult)) {
+                await refreshResult;
+            }
+
+            xrmPage.ui?.refreshRibbon?.(false);
+            this.log("unsupported form refresh completed", {
+                actionName
+            });
+        } catch (error) {
+            this.log("unsupported form refresh failed", {
+                actionName,
+                error: (error as Error).message
+            });
+        }
+    }
+
     private getXrmGlobal(): XrmGlobal | undefined {
         const currentWindowXrm = (window as Window & { Xrm?: XrmGlobal }).Xrm;
 
@@ -2858,6 +2919,28 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         } catch {
             return undefined;
         }
+    }
+
+    private getXrmPage(): XrmPage | undefined {
+        const xrm = this.getXrmGlobal();
+
+        if (xrm?.Page) {
+            return xrm.Page;
+        }
+
+        try {
+            return window.parent && window.parent !== window
+                ? (window.parent as Window & { Xrm?: XrmGlobal }).Xrm?.Page
+                : undefined;
+        } catch {
+            return undefined;
+        }
+    }
+
+    private isPromiseLike(value: unknown): value is PromiseLike<void> {
+        return typeof value === "object"
+            && value !== null
+            && typeof (value as { then?: unknown }).then === "function";
     }
 
     private readString(data: unknown, paths: string[]): string | undefined {
