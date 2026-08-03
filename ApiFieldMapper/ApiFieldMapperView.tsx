@@ -53,6 +53,7 @@ interface AdvisorSections {
   confidenceLabel: string;
   confidenceScore: string;
   customerCallSuggestionInstructions: string;
+  invalidReason: string;
   policyReference: string;
   processingNotes: string;
   reasoning: string;
@@ -65,7 +66,9 @@ interface AdvisorSections {
 export interface ApiFieldMapperViewProps {
   acceptedDecision?: string;
   acceptedResultText?: string;
+  actionStatusLabel?: string;
   canReview: boolean;
+  displaySuggestion?: AdvisorSuggestionViewModel;
   endpointConfigured: boolean;
   errorMessage?: string;
   isDevelopment: boolean;
@@ -121,6 +124,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
     const status = this.props.errorMessage ?? this.props.statusText ?? "Ready";
     const hasAcceptedResult = [this.props.acceptedResultText, this.props.acceptedDecision]
       .some((value) => Boolean(value));
+    const displaySuggestion = this.getDisplaySuggestion();
     const advisor = this.getAdvisorSections();
     const badge = this.getBadgeState();
     const shouldShowStatus = this.props.isLoading || this.state.isStatusVisible;
@@ -136,7 +140,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
           </div>
           <div className="ai-advisor__status">
             <span className={`ai-advisor__badge ai-advisor__badge--${badge.kind}`}>
-              <span className="ai-advisor__badge-dot" />
+              {badge.icon === "generate" ? <span className="ai-advisor__badge-dot" /> : <BadgeIcon kind={badge.icon} />}
               <span>{badge.label}</span>
             </span>
             <span className="ai-advisor__info-icon">i</span>
@@ -151,19 +155,25 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
             AI Recommendation
           </div>
           <div className="ai-advisor__rows">
-            <div className="ai-advisor__row">
-              <span className="ai-advisor__label">Decision by AI:</span>
-              <span className="ai-advisor__value">{advisor.suggestedDecision}</span>
+            <div className="ai-advisor__recommendation-grid">
+              <div className="ai-advisor__row ai-advisor__row--compact">
+                <span className="ai-advisor__label">Decision by AI:</span>
+                <span className="ai-advisor__value">{advisor.suggestedDecision}</span>
+              </div>
+              <div className="ai-advisor__row ai-advisor__row--compact">
+                <span className="ai-advisor__label">Validation by AI:</span>
+                <span className="ai-advisor__value">{advisor.validationByAI}</span>
+              </div>
+              <div className="ai-advisor__row ai-advisor__row--compact">
+                <span className="ai-advisor__label">Closed In Favor Of:</span>
+                <span className="ai-advisor__value">{advisor.closedInFavorOf}</span>
+              </div>
+              <div className="ai-advisor__row ai-advisor__row--compact">
+                <span className="ai-advisor__label">Invalid Reason by AI:</span>
+                <span className="ai-advisor__value">{advisor.invalidReason}</span>
+              </div>
             </div>
-            <div className="ai-advisor__row">
-              <span className="ai-advisor__label">Validation by AI:</span>
-              <span className="ai-advisor__value">{advisor.validationByAI}</span>
-            </div>
-            <div className="ai-advisor__row">
-              <span className="ai-advisor__label">Closed In Favor Of:</span>
-              <span className="ai-advisor__value">{advisor.closedInFavorOf}</span>
-            </div>
-            <div className="ai-advisor__row">
+            <div className="ai-advisor__row ai-advisor__row--full">
               <span className="ai-advisor__label">Feedback by AI:</span>
               <span className="ai-advisor__value">{advisor.suggestedComment}</span>
             </div>
@@ -193,7 +203,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
             <span className="ai-advisor__section-icon">L</span>
             Legal Notes
           </div>
-          {this.renderLegalNotes(this.props.pendingSuggestion?.legalNotes)}
+          {this.renderLegalNotes(displaySuggestion?.legalNotes)}
         </section>
 
         {advisor.policyReference ? (
@@ -307,7 +317,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
   }
 
   private getAdvisorSections(): AdvisorSections {
-    const suggestion = this.props.pendingSuggestion;
+    const suggestion = this.getDisplaySuggestion();
     const confidence = suggestion?.confidence;
     const feedback = suggestion?.feedbackByAI
       ?? suggestion?.suggestedComment
@@ -325,6 +335,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
       confidenceScore: this.formatConfidence(confidence),
       customerCallSuggestionInstructions: suggestion?.customerCallSuggestionInstructionsByAI
         ?? "The customer call suggestion instructions will appear here after the Azure API returns a response.",
+      invalidReason: this.formatOptionSetItem(suggestion?.invalidReason) ?? "--",
       policyReference: suggestion?.policyReference ?? "",
       processingNotes: this.formatProcessingNotes(suggestion),
       reasoning: suggestion?.reasoning
@@ -335,9 +346,14 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
     };
   }
 
-  private getBadgeState(): { kind: "danger" | "neutral" | "success" | "warning"; label: string } {
+  private getBadgeState(): {
+    icon: BadgeIconKind;
+    kind: "danger" | "neutral" | "success" | "warning";
+    label: string;
+  } {
     if (this.props.errorMessage) {
       return {
+        icon: "error",
         kind: "danger",
         label: "AI Failed"
       };
@@ -345,6 +361,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
 
     if (this.props.isDisabled) {
       return {
+        icon: "disabled",
         kind: "neutral",
         label: "Disabled"
       };
@@ -352,6 +369,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
 
     if (this.props.isLoading) {
       return {
+        icon: "generate",
         kind: "warning",
         label: "Generating"
       };
@@ -359,15 +377,71 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
 
     if (this.props.canReview) {
       return {
+        icon: "completed",
         kind: "success",
         label: "AI Completed"
       };
     }
 
+    const actionStatus = this.getActionBadgeState();
+
+    if (actionStatus) {
+      return actionStatus;
+    }
+
     return {
+      icon: "ready",
       kind: "neutral",
       label: "Ready"
     };
+  }
+
+  private getActionBadgeState(): {
+    icon: BadgeIconKind;
+    kind: "danger" | "neutral" | "success" | "warning";
+    label: string;
+  } | undefined {
+    const label = this.props.actionStatusLabel?.trim();
+
+    if (!label) {
+      return undefined;
+    }
+
+    const normalizedLabel = label.toLowerCase();
+
+    if (normalizedLabel === "accepted") {
+      return {
+        icon: "accept",
+        kind: "success",
+        label: "Accepted"
+      };
+    }
+
+    if (normalizedLabel === "rejected") {
+      return {
+        icon: "reject",
+        kind: "danger",
+        label: "Rejected"
+      };
+    }
+
+    if (normalizedLabel === "modified") {
+      return {
+        icon: "modify",
+        kind: "warning",
+        label: "Modified"
+      };
+    }
+
+    return {
+      icon: "ready",
+      kind: "neutral",
+      label
+    };
+  }
+
+  private getDisplaySuggestion(): AdvisorSuggestionViewModel | undefined {
+    return this.props.pendingSuggestion ?? this.props.displaySuggestion;
   }
 
   private formatOptionSetItem(item: OptionSetItemViewModel | undefined): string | undefined {
@@ -412,7 +486,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
 
   private renderLegalNotes(legalNotes: LegalNoteViewModel[] | undefined): React.ReactNode {
     if (!legalNotes || legalNotes.length === 0) {
-      const message = this.props.pendingSuggestion
+      const message = this.getDisplaySuggestion()
         ? "No legal notes were returned for this suggestion."
         : "Legal notes will appear here after the AI returns a response.";
 
@@ -491,6 +565,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
 }
 
 type FluentIconKind = "accept" | "modify" | "generate" | "reject";
+type BadgeIconKind = FluentIconKind | "completed" | "disabled" | "error" | "ready";
 
 interface FluentIconBoxProps {
   kind: FluentIconKind;
@@ -502,6 +577,24 @@ const fluentIconPaths: Record<FluentIconKind, string> = {
   generate: "M4 10a6 6 0 0 1 10.47-4H12.5a.5.5 0 0 0 0 1h3a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 0-1 0v1.6a7 7 0 1 0 1.98 4.36.5.5 0 1 0-1 .08L16 10a6 6 0 0 1-12 0Z",
   reject: "m4.09 4.22.06-.07a.5.5 0 0 1 .63-.06l.07.06L10 9.29l5.15-5.14a.5.5 0 0 1 .63-.06l.07.06c.18.17.2.44.06.63l-.06.07L10.71 10l5.14 5.15c.18.17.2.44.06.63l-.06.07a.5.5 0 0 1-.63.06l-.07-.06L10 10.71l-5.15 5.14a.5.5 0 0 1-.63.06l-.07-.06a.5.5 0 0 1-.06-.63l.06-.07L9.29 10 4.15 4.85a.5.5 0 0 1-.06-.63l.06-.07-.06.07Z"
 };
+
+const badgeIconPaths: Record<BadgeIconKind, string> = {
+  ...fluentIconPaths,
+  completed: fluentIconPaths.accept,
+  disabled: "M10 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16Zm-5.1 4.2a7 7 0 0 0 8.9 8.9L4.9 6.2Zm10.2 7.6a7 7 0 0 0-8.9-8.9l8.9 8.9Z",
+  error: "M10 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16Zm-.5 4.5v4a.5.5 0 0 0 1 0v-4a.5.5 0 0 0-1 0Zm.5 7.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Z",
+  ready: "M10 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16Zm0 1a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm-.5 3.5a.5.5 0 0 1 1 0V10c0 .13-.05.26-.15.35l-2 2a.5.5 0 0 1-.7-.7L9.5 9.79V6.5Z"
+};
+
+function BadgeIcon(props: { kind: BadgeIconKind }): React.ReactElement {
+  return (
+    <span className="ai-advisor__badge-icon" aria-hidden="true">
+      <svg focusable="false" viewBox="0 0 20 20">
+        <path d={badgeIconPaths[props.kind]} />
+      </svg>
+    </span>
+  );
+}
 
 function FluentIconBox(props: FluentIconBoxProps): React.ReactElement {
   return (

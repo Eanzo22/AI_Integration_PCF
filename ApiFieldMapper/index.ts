@@ -188,6 +188,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     private entitySetNameCache: Record<string, string> = {};
     private notifyOutputChanged: () => void = () => undefined;
     private abortController?: AbortController;
+    private aiReviewStatusLabel?: string;
     private closedInFavorOf?: number;
     private customerCallSuggestionInstructionsByAI?: string;
     private decisionByAI?: number;
@@ -205,6 +206,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     private pendingResultJson?: string;
     private pendingResultText?: string;
     private pendingSuggestion?: PendingSuggestion;
+    private persistedSuggestion?: AdvisorSuggestionViewModel;
     private resultJson?: string;
     private resultText?: string;
     private routeToDepartmentComment?: string;
@@ -268,7 +270,9 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         const props: ApiFieldMapperViewProps = {
             acceptedDecision: this.suggestedDecision,
             acceptedResultText: this.suggestedComment ?? this.resultText,
+            actionStatusLabel: this.aiReviewStatusLabel,
             canReview: this.hasPendingResult(),
+            displaySuggestion: this.persistedSuggestion,
             endpointConfigured: Boolean(apiEndpoint),
             errorMessage: this.errorMessage,
             isDevelopment: this.getIsDevelopment(context),
@@ -341,6 +345,17 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.addOutputWithGate(outputs, "statusText", this.statusText);
         this.addOutputWithGate(outputs, "lastRunOn", this.lastRunOn);
         this.addOutputWithGate(outputs, "feedbackByAI", this.feedbackByAI);
+        this.addOutputWithGate(outputs, "reservedDecisionByAI", this.persistedSuggestion?.decisionByAI?.value);
+        this.addOutputWithGate(outputs, "reservedFeedbackByAI", this.persistedSuggestion?.feedbackByAI);
+        this.addOutputWithGate(outputs, "reservedValidationByAI", this.persistedSuggestion?.validationByAI?.value);
+        this.addOutputWithGate(outputs, "reservedInvalidReasonByAI", this.persistedSuggestion?.invalidReason?.value);
+        this.addOutputWithGate(
+            outputs,
+            "reservedCustomerCallSuggestionInstructionsByAI",
+            this.persistedSuggestion?.customerCallSuggestionInstructionsByAI
+        );
+        this.addOutputWithGate(outputs, "reservedClosedInFavorOfByAI", this.persistedSuggestion?.closedInFavorOf?.value);
+        this.addOutputWithGate(outputs, "aiReviewStatusLabel", this.aiReviewStatusLabel);
 
         this.log("getOutputs called", {
             diagnostics: this.getOutputDiagnostics(),
@@ -386,6 +401,61 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.resultJson = context.parameters.resultJson.raw ?? undefined;
         this.statusText = context.parameters.statusText.raw ?? "Ready";
         this.lastRunOn = context.parameters.lastRunOn.raw ?? undefined;
+        this.aiReviewStatusLabel = context.parameters.aiReviewStatusLabel.raw ?? undefined;
+        this.persistedSuggestion = this.buildPersistedSuggestionFromReservedOutputs(context);
+    }
+
+    private buildPersistedSuggestionFromReservedOutputs(
+        context: ComponentFramework.Context<IInputs>
+    ): AdvisorSuggestionViewModel | undefined {
+        const decisionByAI = this.getOptionSetItemFromBoundParameter(context.parameters.reservedDecisionByAI);
+        const validationByAI = this.getOptionSetItemFromBoundParameter(context.parameters.reservedValidationByAI);
+        const invalidReason = this.getOptionSetItemFromBoundParameter(context.parameters.reservedInvalidReasonByAI);
+        const closedInFavorOf = this.getOptionSetItemFromBoundParameter(context.parameters.reservedClosedInFavorOfByAI);
+        const feedbackByAI = context.parameters.reservedFeedbackByAI.raw ?? undefined;
+        const customerCallSuggestionInstructionsByAI =
+            context.parameters.reservedCustomerCallSuggestionInstructionsByAI.raw ?? undefined;
+
+        const hasReservedData = [
+            decisionByAI,
+            validationByAI,
+            invalidReason,
+            closedInFavorOf,
+            feedbackByAI,
+            customerCallSuggestionInstructionsByAI
+        ].some((value) => Boolean(value));
+
+        if (!hasReservedData) {
+            return undefined;
+        }
+
+        return {
+            closedInFavorOf,
+            customerCallSuggestionInstructionsByAI,
+            decisionByAI,
+            feedbackByAI,
+            generatedOn: this.lastRunOn?.toISOString(),
+            invalidReason,
+            legalNotes: this.normalizeLegalNotes(this.legalNotesJson),
+            suggestedComment: feedbackByAI,
+            suggestedDecision: this.formatOptionSetLabel(decisionByAI),
+            validationByAI
+        };
+    }
+
+    private getOptionSetItemFromBoundParameter(
+        parameter: ComponentFramework.PropertyTypes.OptionSetProperty
+    ): OptionSetItemViewModel | undefined {
+        const value = parameter.raw;
+
+        if (value === undefined || value === null) {
+            return undefined;
+        }
+
+        return {
+            label: this.getTextOrOptionSetLabel(parameter),
+            value
+        };
     }
 
     private getInitialGenerateRecordKey(context: ComponentFramework.Context<IInputs>): string | undefined {
@@ -622,6 +692,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.captureCommentOutputSnapshot();
         this.captureAppliedOutputSnapshot(context);
         this.applySuggestionToOutputs(suggestion);
+        this.applyPersistedSuggestionOutputs(suggestion, "Accepted");
         this.logOutputBindings(context, "accept after apply", suggestion);
         this.prepareAgentCommentOutputGate(context, suggestion, "accept");
         this.errorMessage = undefined;
@@ -676,6 +747,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.captureCommentOutputSnapshot();
         this.captureAppliedOutputSnapshot(context);
         this.applySuggestionToOutputs(suggestion);
+        this.applyPersistedSuggestionOutputs(suggestion, "Modified");
         this.logOutputBindings(context, "modify after apply", suggestion);
         this.prepareAgentCommentOutputGate(context, suggestion, "modify");
         this.errorMessage = undefined;
@@ -685,11 +757,13 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
 
         try {
             const associatedCount = await this.associateLegalNotesToCurrentRecord(context, suggestion);
+            const savedReviewState = await this.saveReservedReviewState(context);
             this.statusText = associatedCount > 0
                 ? `Modify applied. ${associatedCount} legal note(s) associated to the Case.`
                 : "Modify applied. Review the returned AI data and edit the form fields before saving.";
             this.log("modify completed", {
                 associatedCount,
+                savedReviewState,
                 statusText: this.statusText
             });
         } catch (error) {
@@ -718,6 +792,12 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.log("reject clicked", {
             pendingResultText: this.pendingResultText
         });
+        const suggestion = this.pendingSuggestion;
+
+        if (suggestion) {
+            this.applyPersistedSuggestionOutputs(suggestion, "Rejected");
+        }
+
         this.clearCommentOutputReplay();
         this.clearPendingSuggestion();
         if (this.hasAppliedSuggestionOutputs) {
@@ -726,8 +806,20 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             this.restoreAppliedOutputSnapshot();
             this.hasAppliedSuggestionOutputs = false;
         }
+        if (suggestion) {
+            this.applyPersistedSuggestionOutputs(suggestion, "Rejected");
+        }
         this.errorMessage = undefined;
         this.statusText = "Rejected. Suggested values were discarded.";
+
+        try {
+            await this.saveReservedReviewState(context);
+        } catch (error) {
+            this.log("reject reserved review state save failed", {
+                error: (error as Error).message
+            });
+        }
+
         this.logOutputBindings(context, "reject after clear");
         this.publishState(context);
     }
@@ -765,6 +857,19 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             validationByAI: this.validationByAI
         });
         this.hasAppliedSuggestionOutputs = true;
+    }
+
+    private applyPersistedSuggestionOutputs(suggestion: PendingSuggestion, actionStatusLabel: string): void {
+        const feedback = suggestion.feedbackByAI ?? suggestion.suggestedComment ?? "";
+
+        this.persistedSuggestion = {
+            ...suggestion,
+            feedbackByAI: feedback,
+            suggestedComment: feedback,
+            suggestedDecision: this.formatOptionSetLabel(suggestion.decisionByAI)
+                ?? suggestion.suggestedDecision
+        };
+        this.aiReviewStatusLabel = actionStatusLabel;
     }
 
     private applyDecisionComment(suggestion: PendingSuggestion, feedback: string): void {
@@ -825,10 +930,10 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         };
     }
 
-    private prepareRejectOutputPacket(): void {
+    private prepareRejectOutputPacket(): RejectOutputPacket | undefined {
         if (!this.appliedOutputSnapshot) {
             this.rejectOutputPacket = undefined;
-            return;
+            return undefined;
         }
 
         // CRM leaves omitted outputs untouched, so Reject sends one explicit undo packet.
@@ -841,6 +946,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.log("reject output packet prepared", {
             diagnostics: this.getOutputPacketDiagnostics(this.rejectOutputPacket)
         });
+
+        return this.rejectOutputPacket;
     }
 
     private consumeRejectOutputPacket(): RejectOutputPacket | undefined {
@@ -1147,8 +1254,71 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.addBoundTextValue(payload, context.parameters.resultText, this.resultText);
         this.addBoundTextValue(payload, context.parameters.resultJson, this.resultJson);
         this.addBoundTextValue(payload, context.parameters.feedbackByAI, this.feedbackByAI);
+        this.addReservedReviewValuesToPayload(payload, context);
 
         return payload;
+    }
+
+    private async saveReservedReviewState(
+        context: ComponentFramework.Context<IInputs>
+    ): Promise<boolean> {
+        const contextInfo = this.getContextInfo(context);
+        const recordId = this.cleanGuid(contextInfo?.entityId ?? "");
+        const entityName = contextInfo?.entityTypeName;
+        const payload: ComponentFramework.WebApi.Entity = {};
+
+        this.addReservedReviewValuesToPayload(payload, context);
+
+        if (!recordId || !entityName || Object.keys(payload).length === 0) {
+            this.log("reserved review state save skipped", {
+                hasEntityName: Boolean(entityName),
+                hasPayload: Object.keys(payload).length > 0,
+                hasRecordId: Boolean(recordId)
+            });
+            return false;
+        }
+
+        await context.webAPI.updateRecord(entityName, recordId, payload);
+        this.log("reserved review state saved", {
+            entityName,
+            payload,
+            recordId
+        });
+
+        return true;
+    }
+
+    private addReservedReviewValuesToPayload(
+        payload: ComponentFramework.WebApi.Entity,
+        context: ComponentFramework.Context<IInputs>
+    ): void {
+        this.addBoundOptionSetValueOrNull(
+            payload,
+            context.parameters.reservedDecisionByAI,
+            this.persistedSuggestion?.decisionByAI?.value
+        );
+        this.addBoundTextValue(payload, context.parameters.reservedFeedbackByAI, this.persistedSuggestion?.feedbackByAI);
+        this.addBoundOptionSetValueOrNull(
+            payload,
+            context.parameters.reservedValidationByAI,
+            this.persistedSuggestion?.validationByAI?.value
+        );
+        this.addBoundOptionSetValueOrNull(
+            payload,
+            context.parameters.reservedInvalidReasonByAI,
+            this.persistedSuggestion?.invalidReason?.value
+        );
+        this.addBoundTextValue(
+            payload,
+            context.parameters.reservedCustomerCallSuggestionInstructionsByAI,
+            this.persistedSuggestion?.customerCallSuggestionInstructionsByAI
+        );
+        this.addBoundOptionSetValueOrNull(
+            payload,
+            context.parameters.reservedClosedInFavorOfByAI,
+            this.persistedSuggestion?.closedInFavorOf?.value
+        );
+        this.addBoundTextValue(payload, context.parameters.aiReviewStatusLabel, this.aiReviewStatusLabel);
     }
 
     private addDecisionCommentToPayload(
@@ -1306,7 +1476,44 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             { name: "resultJson", parameter: context?.parameters.resultJson, usage: "bound", value: this.resultJson },
             { name: "statusText", parameter: context?.parameters.statusText, usage: "bound", value: this.statusText },
             { name: "lastRunOn", parameter: context?.parameters.lastRunOn, usage: "bound", value: this.lastRunOn },
-            { name: "feedbackByAI", parameter: context?.parameters.feedbackByAI, usage: "bound", value: this.feedbackByAI }
+            { name: "feedbackByAI", parameter: context?.parameters.feedbackByAI, usage: "bound", value: this.feedbackByAI },
+            {
+                name: "reservedDecisionByAI",
+                parameter: context?.parameters.reservedDecisionByAI,
+                usage: "bound",
+                value: this.persistedSuggestion?.decisionByAI?.value
+            },
+            {
+                name: "reservedFeedbackByAI",
+                parameter: context?.parameters.reservedFeedbackByAI,
+                usage: "bound",
+                value: this.persistedSuggestion?.feedbackByAI
+            },
+            {
+                name: "reservedValidationByAI",
+                parameter: context?.parameters.reservedValidationByAI,
+                usage: "bound",
+                value: this.persistedSuggestion?.validationByAI?.value
+            },
+            {
+                name: "reservedInvalidReasonByAI",
+                parameter: context?.parameters.reservedInvalidReasonByAI,
+                usage: "bound",
+                value: this.persistedSuggestion?.invalidReason?.value
+            },
+            {
+                name: "reservedCustomerCallSuggestionInstructionsByAI",
+                parameter: context?.parameters.reservedCustomerCallSuggestionInstructionsByAI,
+                usage: "bound",
+                value: this.persistedSuggestion?.customerCallSuggestionInstructionsByAI
+            },
+            {
+                name: "reservedClosedInFavorOfByAI",
+                parameter: context?.parameters.reservedClosedInFavorOfByAI,
+                usage: "bound",
+                value: this.persistedSuggestion?.closedInFavorOf?.value
+            },
+            { name: "aiReviewStatusLabel", parameter: context?.parameters.aiReviewStatusLabel, usage: "bound", value: this.aiReviewStatusLabel }
         ];
     }
 
@@ -1488,6 +1695,20 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         }
 
         payload[logicalName] = value;
+    }
+
+    private addBoundOptionSetValueOrNull(
+        payload: ComponentFramework.WebApi.Entity,
+        parameter: ComponentFramework.PropertyTypes.OptionSetProperty,
+        value: number | undefined
+    ): void {
+        const logicalName = parameter.attributes?.LogicalName;
+
+        if (!logicalName) {
+            return;
+        }
+
+        payload[logicalName] = value ?? null;
     }
 
     private async addLookupBind(

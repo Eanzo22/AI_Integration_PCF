@@ -155,6 +155,22 @@
   background: currentColor;
 }
 
+.ai-advisor__badge-icon {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 14px;
+  justify-content: center;
+  width: 14px;
+}
+
+.ai-advisor__badge-icon svg {
+  display: block;
+  fill: currentColor;
+  height: 14px;
+  width: 14px;
+}
+
 .ai-advisor__section {
   background: rgba(255, 255, 255, 0.55);
   border: 1px solid #c7dcfb;
@@ -180,11 +196,28 @@
   min-width: 0;
 }
 
+.ai-advisor__recommendation-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
 .ai-advisor__row {
   display: grid;
   gap: 10px;
   grid-template-columns: minmax(120px, 170px) minmax(0, 1fr);
   min-width: 0;
+}
+
+.ai-advisor__row--compact {
+  align-content: start;
+  gap: 4px;
+  grid-template-columns: 1fr;
+}
+
+.ai-advisor__row--full {
+  grid-template-columns: minmax(120px, 170px) minmax(0, 1fr);
 }
 
 .ai-advisor__label {

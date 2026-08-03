@@ -1,6 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <manifest>
-  <control namespace="AIIntegration" constructor="ApiFieldMapper" version="0.0.32" display-name-key="ApiFieldMapper" description-key="ApiFieldMapper description" control-type="standard">
+  <control namespace="AIIntegration" constructor="ApiFieldMapper" version="0.0.34" display-name-key="ApiFieldMapper" description-key="ApiFieldMapper description" control-type="standard">
     <!--external-service-usage node declares whether this 3rd party PCF control is using external service or not, if yes, this control will be considered as premium and please also add the external domain it is using.
     If it is not using any external service, please set the enabled="false" and DO NOT add any domain below. The "enabled" will be false by default.
     Example1:
@@ -70,6 +70,13 @@
     <property name="statusText" display-name-key="Status_Text_Display_Key" description-key="Status_Text_Desc_Key" of-type="SingleLine.Text" usage="bound" required="false" />
     <property name="lastRunOn" display-name-key="Last_Run_On_Display_Key" description-key="Last_Run_On_Desc_Key" of-type="DateAndTime.DateAndTime" usage="bound" required="false" />
     <property name="feedbackByAI" display-name-key="Feedback_By_AI_Display_Key" description-key="Feedback_By_AI_Desc_Key" of-type="Multiple" usage="bound" required="false" />
+    <property name="reservedDecisionByAI" display-name-key="Reserved_Decision_By_AI_Display_Key" description-key="Stores the last AI decision for persistent PCF display" of-type="OptionSet" usage="bound" required="false" />
+    <property name="reservedFeedbackByAI" display-name-key="Reserved_Feedback_By_AI_Display_Key" description-key="Stores the last AI feedback for persistent PCF display" of-type="Multiple" usage="bound" required="false" />
+    <property name="reservedValidationByAI" display-name-key="Reserved_Validation_By_AI_Display_Key" description-key="Stores the last AI validation for persistent PCF display" of-type="OptionSet" usage="bound" required="false" />
+    <property name="reservedInvalidReasonByAI" display-name-key="Reserved_Invalid_Reason_By_AI_Display_Key" description-key="Stores the last AI invalid reason for persistent PCF display" of-type="OptionSet" usage="bound" required="false" />
+    <property name="reservedCustomerCallSuggestionInstructionsByAI" display-name-key="Reserved_Customer_Call_Suggestion_Instructions_By_AI_Display_Key" description-key="Stores the last AI customer call suggestion instructions for persistent PCF display" of-type="Multiple" usage="bound" required="false" />
+    <property name="reservedClosedInFavorOfByAI" display-name-key="Reserved_Closed_In_Favor_Of_By_AI_Display_Key" description-key="Stores the last AI closed in favor of value for persistent PCF display" of-type="OptionSet" usage="bound" required="false" />
+    <property name="aiReviewStatusLabel" display-name-key="AI_Review_Status_Label_Display_Key" description-key="Stores the last AI review action label: Accepted, Modified, or Rejected" of-type="SingleLine.Text" usage="bound" required="false" />
     <!--
       Property node's of-type attribute can be of-type-group attribute.
       Example:
