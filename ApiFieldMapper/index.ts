@@ -144,6 +144,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     private readonly decisionRouteToDepartmentValue = 2;
     private readonly decisionRouteToServiceProviderValue = 1;
     private readonly agentCommentLogicalName = "ldv_agentcomment";
+    private readonly bpfGateRefreshIntervalMs = 5000;
     private readonly commentOutputReplayDelaysMs = [250, 1000];
     private readonly initialGenerateRecordKeyStateName = "initialGenerateRecordKey";
     private readonly initialGenerateStartedStateName = "initialGenerateStarted";
@@ -186,6 +187,10 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     private assessDisputeComment?: string;
     private boundField?: string;
     private bpfCheckKey?: string;
+    private bpfGateCheckedKey?: string;
+    private bpfGateLastRefreshOn = 0;
+    private bpfGatePromise?: Promise<boolean>;
+    private bpfGatePromiseKey?: string;
     private bpfDisabledReason?: string;
     private bpfStageName?: string;
     private commentOutputSnapshot?: CommentOutputSnapshot;
@@ -267,6 +272,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             hasInputText: Boolean(this.getInputText(context))
         });
         this.logBoundOutputLogicalNames(context, "init");
+        this.requestBpfGateRefresh(context, true);
         void this.refreshOwnerGate(context);
         this.log("initial generate disabled");
     }
@@ -278,6 +284,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
      */
     public updateView(context: ComponentFramework.Context<IInputs>): void {
         this.isDevelopmentMode = this.getIsDevelopment(context);
+        this.requestBpfGateRefresh(context);
         void this.refreshOwnerGate(context);
         const sourceValue = context.parameters.inputValue.raw ?? "";
         const apiEndpoint = this.getApiEndpoint(context);
@@ -289,6 +296,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             acceptedResultText: this.suggestedComment ?? this.resultText,
             actionStatusLabel: this.aiReviewStatusLabel,
             actionDisabledReason: this.getActionDisabledReason(),
+            allowedBpfStagesTooltip: this.getAllowedBpfStagesTooltip(context),
             canReview: this.hasPendingResult(),
             canTakeActions: this.isCurrentRecordOwner,
             displaySuggestion: this.persistedSuggestion,
@@ -2156,6 +2164,22 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             .filter(Boolean);
     }
 
+    private getAllowedBpfStagesTooltip(context: ComponentFramework.Context<IInputs>): string | undefined {
+        if (!this.getIsBpfHandled(context)) {
+            return undefined;
+        }
+
+        const allowedStages = this.getAllowedBpfStageNames(context);
+
+        if (allowedStages.length === 0) {
+            return "This feature has no allowed BPF stages configured.";
+        }
+
+        return allowedStages.length === 1
+            ? `This feature is only allowed on ${allowedStages[0]}.`
+            : `This feature is only allowed on these BPF stages: ${allowedStages.join(", ")}.`;
+    }
+
     private getBpfCheckKey(context: ComponentFramework.Context<IInputs>): string {
         return [
             this.getIsBpfHandled(context) ? "true" : "false",
@@ -2171,16 +2195,38 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             this.isBpfDisabled = false;
             this.bpfDisabledReason = undefined;
             this.bpfStageName = undefined;
+            this.bpfGateCheckedKey = undefined;
+            this.bpfGatePromise = undefined;
+            this.bpfGatePromiseKey = undefined;
             return true;
         }
 
         const checkKey = this.getBpfCheckKey(context);
 
-        if (!force && this.bpfCheckKey === checkKey) {
+        if (!force && this.bpfGatePromise && this.bpfGatePromiseKey === checkKey) {
+            return this.bpfGatePromise;
+        }
+
+        if (!force && this.bpfGateCheckedKey === checkKey) {
             return !this.isBpfDisabled;
         }
 
         this.bpfCheckKey = checkKey;
+        this.bpfGatePromiseKey = checkKey;
+        const refreshPromise = this.runBpfGateRefresh(context, checkKey)
+            .finally(() => {
+                if (this.bpfGatePromiseKey === checkKey && this.bpfGatePromise === refreshPromise) {
+                    this.bpfGatePromise = undefined;
+                    this.bpfGatePromiseKey = undefined;
+                }
+            });
+
+        this.bpfGatePromise = refreshPromise;
+
+        return refreshPromise;
+    }
+
+    private async runBpfGateRefresh(context: ComponentFramework.Context<IInputs>, checkKey: string): Promise<boolean> {
         const allowedStages = this.getAllowedBpfStageNames(context).map((stageName) => this.normalizeStageName(stageName));
 
         if (!this.getCurrentRecordId(context) || allowedStages.length === 0) {
@@ -2188,6 +2234,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             this.bpfDisabledReason = "AI Advisor is disabled because no allowed BPF stages are configured.";
             this.statusText = this.bpfDisabledReason;
             this.errorMessage = undefined;
+            this.bpfGateCheckedKey = checkKey;
+            this.bpfGateLastRefreshOn = Date.now();
             return false;
         }
 
@@ -2198,6 +2246,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         } catch (error) {
             this.isBpfDisabled = false;
             this.bpfDisabledReason = undefined;
+            this.bpfGateCheckedKey = checkKey;
+            this.bpfGateLastRefreshOn = Date.now();
             this.log("bpf gate check failed", {
                 error: (error as Error).message
             });
@@ -2224,7 +2274,45 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             stage
         });
 
+        this.bpfGateCheckedKey = checkKey;
+        this.bpfGateLastRefreshOn = Date.now();
+
         return !this.isBpfDisabled;
+    }
+
+    private requestBpfGateRefresh(context: ComponentFramework.Context<IInputs>, force = false): void {
+        const isBpfHandled = this.getIsBpfHandled(context);
+        const checkKey = isBpfHandled ? this.getBpfCheckKey(context) : "bpf-disabled";
+        const isCheckingSameGate = Boolean(this.bpfGatePromise && this.bpfGatePromiseKey === checkKey);
+        const isStale = Date.now() - this.bpfGateLastRefreshOn > this.bpfGateRefreshIntervalMs;
+
+        if (!force && isCheckingSameGate) {
+            return;
+        }
+
+        if (!force && isBpfHandled && this.bpfGateCheckedKey === checkKey && !isStale) {
+            return;
+        }
+
+        if (!force && !isBpfHandled && !this.isBpfDisabled) {
+            return;
+        }
+
+        const previousDisabled = this.isBpfDisabled;
+        const previousStageName = this.bpfStageName;
+        const previousStatusText = this.statusText;
+
+        void this.refreshBpfGate(context, force).then((isAllowed) => {
+            if (
+                previousDisabled !== this.isBpfDisabled
+                || previousStageName !== this.bpfStageName
+                || previousStatusText !== this.statusText
+            ) {
+                this.updateView(context);
+            }
+
+            return isAllowed;
+        });
     }
 
     private async ensureActionAllowed(context: ComponentFramework.Context<IInputs>, actionName: string): Promise<boolean> {

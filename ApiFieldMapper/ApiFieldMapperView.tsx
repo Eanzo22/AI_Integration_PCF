@@ -69,6 +69,7 @@ export interface ApiFieldMapperViewProps {
   acceptedResultText?: string;
   actionStatusLabel?: string;
   actionDisabledReason?: string;
+  allowedBpfStagesTooltip?: string;
   canReview: boolean;
   canTakeActions: boolean;
   displaySuggestion?: AdvisorSuggestionViewModel;
@@ -90,6 +91,12 @@ export interface ApiFieldMapperViewProps {
 
 interface ApiFieldMapperViewState {
   isStatusVisible: boolean;
+}
+
+interface BadgeState {
+  icon: BadgeIconKind;
+  kind: "danger" | "neutral" | "success" | "warning";
+  label: string;
 }
 
 const statusVisibleMs = 8000;
@@ -129,7 +136,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
       .some((value) => Boolean(value));
     const displaySuggestion = this.getDisplaySuggestion();
     const advisor = this.getAdvisorSections();
-    const badge = this.getBadgeState();
+    const badges = this.getBadgeStates();
     const shouldShowStatus = this.props.isLoading || this.state.isStatusVisible;
     const actionDisabledReason = this.props.canTakeActions ? undefined : this.props.actionDisabledReason;
     const isActionBlocked = Boolean(actionDisabledReason);
@@ -139,7 +146,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
       : actionDisabledReason;
 
     return (
-      <div className="ai-advisor">
+      <div className={`ai-advisor${this.props.isDisabled ? " ai-advisor--disabled" : ""}`} aria-disabled={this.props.isDisabled}>
         <div className="ai-advisor__header">
           <div className="ai-advisor__title">
             <span className="ai-advisor__title-icon">AI</span>
@@ -148,11 +155,19 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
             </span>
           </div>
           <div className="ai-advisor__status">
-            <span className={`ai-advisor__badge ai-advisor__badge--${badge.kind}`}>
-              {badge.icon === "generate" ? <span className="ai-advisor__badge-dot" /> : <BadgeIcon kind={badge.icon} />}
-              <span>{badge.label}</span>
+            {badges.map((badge) => (
+              <span className={`ai-advisor__badge ai-advisor__badge--${badge.kind}`} key={badge.label}>
+                {badge.icon === "generate" ? <span className="ai-advisor__badge-dot" /> : <BadgeIcon kind={badge.icon} />}
+                <span>{badge.label}</span>
+              </span>
+            ))}
+            <span
+              className="ai-advisor__info-icon"
+              data-tooltip={this.props.allowedBpfStagesTooltip}
+              title={this.props.allowedBpfStagesTooltip}
+            >
+              i
             </span>
-            <span className="ai-advisor__info-icon">i</span>
           </div>
         </div>
 
@@ -379,61 +394,56 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
     };
   }
 
-  private getBadgeState(): {
-    icon: BadgeIconKind;
-    kind: "danger" | "neutral" | "success" | "warning";
-    label: string;
-  } {
+  private getBadgeStates(): BadgeState[] {
     if (this.props.errorMessage) {
-      return {
+      return [{
         icon: "error",
         kind: "danger",
         label: "AI Failed"
-      };
+      }];
     }
 
     if (this.props.isDisabled) {
-      return {
+      const disabledBadge: BadgeState = {
         icon: "disabled",
         kind: "neutral",
         label: "Disabled"
       };
+      const actionStatus = this.getActionBadgeState();
+
+      return actionStatus ? [disabledBadge, actionStatus] : [disabledBadge];
     }
 
     if (this.props.isLoading) {
-      return {
+      return [{
         icon: "generate",
         kind: "warning",
         label: "Generating"
-      };
+      }];
     }
 
     if (this.props.canReview) {
-      return {
+      return [{
         icon: "completed",
         kind: "success",
         label: "AI Completed"
-      };
+      }];
     }
 
     const actionStatus = this.getActionBadgeState();
 
     if (actionStatus) {
-      return actionStatus;
+      return [actionStatus];
     }
 
-    return {
+    return [{
       icon: "ready",
       kind: "neutral",
       label: "Ready"
-    };
+    }];
   }
 
-  private getActionBadgeState(): {
-    icon: BadgeIconKind;
-    kind: "danger" | "neutral" | "success" | "warning";
-    label: string;
-  } | undefined {
+  private getActionBadgeState(): BadgeState | undefined {
     const label = this.props.actionStatusLabel?.trim();
 
     if (!label) {
