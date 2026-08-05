@@ -211,8 +211,13 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     private isBpfDisabled = false;
     private isDevelopmentMode = false;
     private isLoading = false;
+    private isOwnerCheckLoading = false;
+    private isCurrentRecordOwner = false;
     private lastRunOn?: Date;
     private legalNotesJson?: string;
+    private ownerCheckKey?: string;
+    private ownerCheckPromise?: Promise<boolean>;
+    private ownerDisabledReason?: string;
     private pendingResultJson?: string;
     private pendingResultText?: string;
     private pendingSuggestion?: PendingSuggestion;
@@ -262,6 +267,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             hasInputText: Boolean(this.getInputText(context))
         });
         this.logBoundOutputLogicalNames(context, "init");
+        void this.refreshOwnerGate(context);
         this.log("initial generate disabled");
     }
 
@@ -272,6 +278,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
      */
     public updateView(context: ComponentFramework.Context<IInputs>): void {
         this.isDevelopmentMode = this.getIsDevelopment(context);
+        void this.refreshOwnerGate(context);
         const sourceValue = context.parameters.inputValue.raw ?? "";
         const apiEndpoint = this.getApiEndpoint(context);
 
@@ -281,7 +288,9 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             acceptedDecision: this.suggestedDecision,
             acceptedResultText: this.suggestedComment ?? this.resultText,
             actionStatusLabel: this.aiReviewStatusLabel,
+            actionDisabledReason: this.getActionDisabledReason(),
             canReview: this.hasPendingResult(),
+            canTakeActions: this.isCurrentRecordOwner,
             displaySuggestion: this.persistedSuggestion,
             endpointConfigured: Boolean(apiEndpoint),
             errorMessage: this.errorMessage,
@@ -556,6 +565,10 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         const generationId = this.activeGenerationId + 1;
         this.rejectOutputPacket = undefined;
 
+        if (!await this.ensureActionAllowed(context, "generate")) {
+            return;
+        }
+
         if (!await this.refreshBpfGate(context, true)) {
             this.publishState(context);
             return;
@@ -686,6 +699,10 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     }
 
     private async acceptPendingResult(context: ComponentFramework.Context<IInputs>): Promise<void> {
+        if (!await this.ensureActionAllowed(context, "accept")) {
+            return;
+        }
+
         if (!await this.refreshBpfGate(context, true)) {
             this.publishState(context);
             return;
@@ -697,6 +714,15 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         }
 
         const suggestion = this.pendingSuggestion;
+
+        if (this.isAssessCaseDecision(suggestion)) {
+            this.errorMessage = undefined;
+            this.statusText = "You need to fill the Customer Satisfaction";
+            this.log("accept blocked: customer satisfaction required", this.toSuggestionLog(suggestion));
+            this.publishState(context);
+            return;
+        }
+
         this.log("accept clicked", this.toSuggestionLog(suggestion));
         this.rejectOutputPacket = undefined;
         this.captureCommentOutputSnapshot();
@@ -742,6 +768,10 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     }
 
     private async modifyPendingResult(context: ComponentFramework.Context<IInputs>): Promise<void> {
+        if (!await this.ensureActionAllowed(context, "modify")) {
+            return;
+        }
+
         if (!await this.refreshBpfGate(context, true)) {
             this.publishState(context);
             return;
@@ -791,6 +821,10 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     }
 
     private async rejectPendingResult(context: ComponentFramework.Context<IInputs>): Promise<void> {
+        if (!await this.ensureActionAllowed(context, "reject")) {
+            return;
+        }
+
         if (!await this.refreshBpfGate(context, true)) {
             this.publishState(context);
             return;
@@ -2193,6 +2227,141 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         return !this.isBpfDisabled;
     }
 
+    private async ensureActionAllowed(context: ComponentFramework.Context<IInputs>, actionName: string): Promise<boolean> {
+        if (await this.refreshOwnerGate(context, true)) {
+            return true;
+        }
+
+        this.errorMessage = undefined;
+        this.statusText = this.getActionDisabledReason();
+        this.log("action blocked: current user is not record owner", {
+            actionName,
+            reason: this.statusText
+        });
+        this.publishState(context);
+
+        return false;
+    }
+
+    private async refreshOwnerGate(context: ComponentFramework.Context<IInputs>, force = false): Promise<boolean> {
+        const checkKey = this.getOwnerCheckKey(context);
+
+        if (!checkKey) {
+            this.isCurrentRecordOwner = false;
+            this.isOwnerCheckLoading = false;
+            this.ownerCheckKey = undefined;
+            this.ownerCheckPromise = undefined;
+            this.ownerDisabledReason = "AI Advisor actions are available only after the Case record and current user can be identified.";
+            return false;
+        }
+
+        if (!force && this.ownerCheckKey === checkKey && !this.isOwnerCheckLoading) {
+            return this.isCurrentRecordOwner;
+        }
+
+        if (!force && this.ownerCheckKey === checkKey && this.ownerCheckPromise) {
+            return this.ownerCheckPromise;
+        }
+
+        this.ownerCheckKey = checkKey;
+        this.isCurrentRecordOwner = false;
+        this.isOwnerCheckLoading = true;
+        this.ownerDisabledReason = "Checking Case owner...";
+
+        const checkPromise = this.retrieveCurrentUserOwnership(context, checkKey)
+            .then((isOwner) => {
+                if (this.ownerCheckKey !== checkKey) {
+                    return false;
+                }
+
+                this.isCurrentRecordOwner = isOwner;
+                this.ownerDisabledReason = isOwner
+                    ? undefined
+                    : "Only the owner of this Case can take actions on the AI Advisor.";
+
+                return isOwner;
+            })
+            .catch((error) => {
+                if (this.ownerCheckKey === checkKey) {
+                    this.isCurrentRecordOwner = false;
+                    this.ownerDisabledReason = "Could not verify the Case owner. AI Advisor actions are disabled.";
+                }
+
+                this.log("owner gate check failed", {
+                    error: (error as Error).message
+                });
+
+                return false;
+            })
+            .finally(() => {
+                if (this.ownerCheckKey === checkKey && this.ownerCheckPromise === checkPromise) {
+                    this.isOwnerCheckLoading = false;
+                    this.ownerCheckPromise = undefined;
+                    this.publishState(context);
+                }
+            });
+
+        this.ownerCheckPromise = checkPromise;
+
+        return checkPromise;
+    }
+
+    private async retrieveCurrentUserOwnership(
+        context: ComponentFramework.Context<IInputs>,
+        checkKey: string
+    ): Promise<boolean> {
+        const contextInfo = this.getContextInfo(context);
+        const recordId = this.cleanGuid(contextInfo?.entityId ?? "");
+        const entityName = contextInfo?.entityTypeName;
+        const currentUserId = this.getCurrentUserId(context);
+
+        if (!entityName || !recordId || !currentUserId) {
+            return false;
+        }
+
+        const record = await context.webAPI.retrieveRecord(entityName, recordId, "?$select=_ownerid_value");
+        const ownerId = this.cleanGuid(this.readString(record, ["_ownerid_value"]) ?? "");
+        const isOwner = ownerId.toLowerCase() === currentUserId.toLowerCase();
+
+        this.log("owner gate checked", {
+            checkKey,
+            currentUserId,
+            entityName,
+            isOwner,
+            ownerId,
+            recordId
+        });
+
+        return isOwner;
+    }
+
+    private getOwnerCheckKey(context: ComponentFramework.Context<IInputs>): string | undefined {
+        const contextInfo = this.getContextInfo(context);
+        const entityName = contextInfo?.entityTypeName?.trim().toLowerCase();
+        const recordId = this.cleanGuid(contextInfo?.entityId ?? "").toLowerCase();
+        const currentUserId = this.getCurrentUserId(context).toLowerCase();
+
+        return entityName && recordId && currentUserId
+            ? `${entityName}:${recordId}:${currentUserId}`
+            : undefined;
+    }
+
+    private getCurrentUserId(context: ComponentFramework.Context<IInputs>): string {
+        const userSettings = context.userSettings as unknown as { userId?: string };
+
+        return this.cleanGuid(userSettings.userId ?? "");
+    }
+
+    private getActionDisabledReason(): string | undefined {
+        if (this.isOwnerCheckLoading) {
+            return "Checking Case owner...";
+        }
+
+        return this.isCurrentRecordOwner
+            ? undefined
+            : this.ownerDisabledReason ?? "Only the owner of this Case can take actions on the AI Advisor.";
+    }
+
     private async getCurrentBpfStage(context: ComponentFramework.Context<IInputs>): Promise<BpfStageResult> {
         const caseId = this.getCurrentRecordId(context);
         const bpfEntityName = this.getBpfEntityName(context);
@@ -2477,9 +2646,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
                 "customerCallSuggestion",
                 "customer_call_suggestion",
                 "callInstructions",
-                "call_instructions",
-                "Reason",
-                "reason"
+                "call_instructions"
             ]),
             decisionByAI,
             validationByAI,

@@ -57,6 +57,7 @@ interface AdvisorSections {
   policyReference: string;
   processingNotes: string;
   reasoning: string;
+  routeToSPReasons: string;
   suggestedComment: string;
   suggestedDecision: string;
   validationByAI: string;
@@ -67,7 +68,9 @@ export interface ApiFieldMapperViewProps {
   acceptedDecision?: string;
   acceptedResultText?: string;
   actionStatusLabel?: string;
+  actionDisabledReason?: string;
   canReview: boolean;
+  canTakeActions: boolean;
   displaySuggestion?: AdvisorSuggestionViewModel;
   endpointConfigured: boolean;
   errorMessage?: string;
@@ -128,6 +131,12 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
     const advisor = this.getAdvisorSections();
     const badge = this.getBadgeState();
     const shouldShowStatus = this.props.isLoading || this.state.isStatusVisible;
+    const actionDisabledReason = this.props.canTakeActions ? undefined : this.props.actionDisabledReason;
+    const isActionBlocked = Boolean(actionDisabledReason);
+    const isAcceptBlockedByAssessDispute = this.isAssessDisputeSuggestion(this.props.pendingSuggestion);
+    const acceptDisabledReason = isAcceptBlockedByAssessDispute
+      ? "You need to fill the Customer Satisfaction"
+      : actionDisabledReason;
 
     return (
       <div className="ai-advisor">
@@ -177,16 +186,24 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
               <span className="ai-advisor__label">Feedback by AI:</span>
               <span className="ai-advisor__value">{advisor.suggestedComment}</span>
             </div>
+            {advisor.routeToSPReasons ? (
+              <div className="ai-advisor__row ai-advisor__row--full">
+                <span className="ai-advisor__label">Route to SP Reasons:</span>
+                <span className="ai-advisor__value">{advisor.routeToSPReasons}</span>
+              </div>
+            ) : null}
           </div>
         </section>
 
-        <section className="ai-advisor__section">
-          <div className="ai-advisor__section-title">
-            <span className="ai-advisor__section-icon">Q</span>
-            Customer Call Instructions
-          </div>
-          <div className="ai-advisor__body">{advisor.customerCallSuggestionInstructions}</div>
-        </section>
+        {advisor.customerCallSuggestionInstructions ? (
+          <section className="ai-advisor__section">
+            <div className="ai-advisor__section-title">
+              <span className="ai-advisor__section-icon">Q</span>
+              Customer Call Instructions
+            </div>
+            <div className="ai-advisor__body">{advisor.customerCallSuggestionInstructions}</div>
+          </section>
+        ) : null}
 
         {advisor.processingNotes ? (
           <section className="ai-advisor__section">
@@ -239,42 +256,56 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
 
         <div className="ai-advisor__actions">
           <div className="ai-advisor__button-row">
-            <button
-              type="button"
-              className="ai-advisor__button ai-advisor__button--generate"
-              disabled={this.props.isDisabled || !this.props.endpointConfigured || this.props.isLoading}
-              onClick={this.props.onGenerate}
-            >
-              <FluentIconBox kind="generate" />
-              <span>Generate</span>
-            </button>
-            <button
-              type="button"
-              className="ai-advisor__button ai-advisor__button--accept"
-              disabled={this.props.isDisabled || !this.props.canReview || this.props.isLoading}
-              onClick={this.props.onAccept}
-            >
-              <FluentIconBox kind="accept" />
-              <span>Accept</span>
-            </button>
-            <button
-              type="button"
-              className="ai-advisor__button ai-advisor__button--reject"
-              disabled={this.props.isDisabled || !this.props.canReview || this.props.isLoading}
-              onClick={this.props.onReject}
-            >
-              <FluentIconBox kind="reject" />
-              <span>Reject</span>
-            </button>
-            <button
-              type="button"
-              className="ai-advisor__button ai-advisor__button--modify"
-              disabled={this.props.isDisabled || !this.props.canReview || this.props.isLoading}
-              onClick={this.props.onModify}
-            >
-              <FluentIconBox kind="modify" />
-              <span>Modify</span>
-            </button>
+            <span className="ai-advisor__button-shell" data-tooltip={actionDisabledReason}>
+              <button
+                type="button"
+                className="ai-advisor__button ai-advisor__button--generate"
+                disabled={this.props.isDisabled || isActionBlocked || !this.props.endpointConfigured || this.props.isLoading}
+                onClick={this.props.onGenerate}
+              >
+                <FluentIconBox kind="generate" />
+                <span>Generate</span>
+              </button>
+            </span>
+            <span className="ai-advisor__button-shell" data-tooltip={acceptDisabledReason}>
+              <button
+                type="button"
+                className={`ai-advisor__button ai-advisor__button--accept${isAcceptBlockedByAssessDispute ? " ai-advisor__button--dimmed" : ""}`}
+                disabled={
+                  this.props.isDisabled
+                  || isActionBlocked
+                  || !this.props.canReview
+                  || this.props.isLoading
+                  || isAcceptBlockedByAssessDispute
+                }
+                onClick={this.props.onAccept}
+              >
+                <FluentIconBox kind="accept" />
+                <span>Accept</span>
+              </button>
+            </span>
+            <span className="ai-advisor__button-shell" data-tooltip={actionDisabledReason}>
+              <button
+                type="button"
+                className="ai-advisor__button ai-advisor__button--reject"
+                disabled={this.props.isDisabled || isActionBlocked || !this.props.canReview || this.props.isLoading}
+                onClick={this.props.onReject}
+              >
+                <FluentIconBox kind="reject" />
+                <span>Reject</span>
+              </button>
+            </span>
+            <span className="ai-advisor__button-shell" data-tooltip={actionDisabledReason}>
+              <button
+                type="button"
+                className="ai-advisor__button ai-advisor__button--modify"
+                disabled={this.props.isDisabled || isActionBlocked || !this.props.canReview || this.props.isLoading}
+                onClick={this.props.onModify}
+              >
+                <FluentIconBox kind="modify" />
+                <span>Modify</span>
+              </button>
+            </span>
           </div>
           {shouldShowStatus ? (
             <span className="ai-advisor__action-status">
@@ -333,13 +364,15 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
       closedInFavorOf: this.formatOptionSetItem(suggestion?.closedInFavorOf) ?? "--",
       confidenceLabel: suggestion?.confidenceLabel ?? this.mapConfidenceLabel(confidence),
       confidenceScore: this.formatConfidence(confidence),
-      customerCallSuggestionInstructions: suggestion?.customerCallSuggestionInstructionsByAI
-        ?? "The customer call suggestion instructions will appear here after the Azure API returns a response.",
+      customerCallSuggestionInstructions: suggestion?.customerCallSuggestionInstructionsByAI?.trim() ?? "",
       invalidReason: this.formatOptionSetItem(suggestion?.invalidReason) ?? "--",
       policyReference: suggestion?.policyReference ?? "",
       processingNotes: this.formatProcessingNotes(suggestion),
       reasoning: suggestion?.reasoning
         ?? feedback,
+      routeToSPReasons: this.shouldShowRouteToSPReasons(suggestion)
+        ? suggestion?.routeToSPReasons?.trim() ?? ""
+        : "",
       suggestedComment: feedback,
       suggestedDecision: decisionByAI,
       validationByAI: this.formatOptionSetItem(suggestion?.validationByAI) ?? "--"
@@ -470,9 +503,46 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
     }
 
     return [
-      suggestion.invalidReason ? `Invalid Reason: ${this.formatOptionSetItem(suggestion.invalidReason)}` : undefined,
-      suggestion.routeToSPReasons ? `Route to SP Reasons: ${suggestion.routeToSPReasons}` : undefined
+      suggestion.invalidReason ? `Invalid Reason: ${this.formatOptionSetItem(suggestion.invalidReason)}` : undefined
     ].filter(Boolean).join("\n");
+  }
+
+  private shouldShowRouteToSPReasons(suggestion: AdvisorSuggestionViewModel | undefined): boolean {
+    if (!suggestion?.routeToSPReasons?.trim()) {
+      return false;
+    }
+
+    if (suggestion.decisionByAI?.value === 1) {
+      return true;
+    }
+
+    const decisionText = [
+      suggestion.decisionByAI?.label,
+      suggestion.suggestedDecision
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join(" ")
+      .toLowerCase();
+
+    return decisionText.includes("route to service provider")
+      || decisionText.includes("route to sp");
+  }
+
+  private isAssessDisputeSuggestion(suggestion: AdvisorSuggestionViewModel | undefined): boolean {
+    if (suggestion?.decisionByAI?.value === 3) {
+      return true;
+    }
+
+    const decisionText = [
+      suggestion?.decisionByAI?.label,
+      suggestion?.suggestedDecision
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join(" ")
+      .toLowerCase();
+
+    return decisionText.includes("assess dispute")
+      || decisionText.includes("assess case");
   }
 
   private formatAcceptedSummary(): string {
