@@ -25,6 +25,12 @@ export interface OptionSetItemViewModel {
   value?: number;
 }
 
+export interface LookupItemViewModel {
+  entityType?: string;
+  id?: string;
+  name?: string;
+}
+
 export interface AdvisorSuggestionViewModel {
   advisoryNote?: string;
   caseRequestId?: string;
@@ -42,6 +48,7 @@ export interface AdvisorSuggestionViewModel {
   requestId?: string;
   reasoning?: string;
   responseMessage?: string;
+  routeToSPReason?: LookupItemViewModel;
   routeToSPReasons?: string;
   suggestedComment?: string;
   suggestedDecision?: string;
@@ -55,7 +62,7 @@ interface AdvisorSections {
   customerCallSuggestionInstructions: string;
   invalidReason: string;
   policyReference: string;
-  processingNotes: string;
+  // processingNotes: string;
   reasoning: string;
   routeToSPReasons: string;
   suggestedComment: string;
@@ -220,7 +227,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
           </section>
         ) : null}
 
-        {advisor.processingNotes ? (
+        {/* {advisor.processingNotes ? (
           <section className="ai-advisor__section">
             <div className="ai-advisor__section-title">
               <span className="ai-advisor__section-icon">V</span>
@@ -228,7 +235,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
             </div>
             <div className="ai-advisor__body">{advisor.processingNotes}</div>
           </section>
-        ) : null}
+        ) : null} */}
 
         <section className="ai-advisor__section">
           <div className="ai-advisor__section-title">
@@ -382,11 +389,11 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
       customerCallSuggestionInstructions: suggestion?.customerCallSuggestionInstructionsByAI?.trim() ?? "",
       invalidReason: this.formatOptionSetItem(suggestion?.invalidReason) ?? "--",
       policyReference: suggestion?.policyReference ?? "",
-      processingNotes: this.formatProcessingNotes(suggestion),
+      // processingNotes: this.formatProcessingNotes(suggestion),
       reasoning: suggestion?.reasoning
         ?? feedback,
       routeToSPReasons: this.shouldShowRouteToSPReasons(suggestion)
-        ? suggestion?.routeToSPReasons?.trim() ?? ""
+        ? this.formatLookupItem(suggestion?.routeToSPReason) ?? suggestion?.routeToSPReasons?.trim() ?? ""
         : "",
       suggestedComment: feedback,
       suggestedDecision: decisionByAI,
@@ -507,6 +514,29 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
     return undefined;
   }
 
+  private formatLookupItem(item: LookupItemViewModel | undefined): string | undefined {
+    if (!item) {
+      return undefined;
+    }
+
+    const name = item.name?.trim();
+    const id = item.id?.trim();
+
+    if (name && id) {
+      return this.props.isDevelopment ? `${name} (${id})` : name;
+    }
+
+    if (name) {
+      return name;
+    }
+
+    if (id) {
+      return this.props.isDevelopment ? id : undefined;
+    }
+
+    return undefined;
+  }
+
   private formatProcessingNotes(suggestion: AdvisorSuggestionViewModel | undefined): string {
     if (!suggestion) {
       return "";
@@ -518,7 +548,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
   }
 
   private shouldShowRouteToSPReasons(suggestion: AdvisorSuggestionViewModel | undefined): boolean {
-    if (!suggestion?.routeToSPReasons?.trim()) {
+    if (!suggestion?.routeToSPReason && !suggestion?.routeToSPReasons?.trim()) {
       return false;
     }
 

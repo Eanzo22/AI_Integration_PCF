@@ -1,6 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <manifest>
-  <control namespace="AIIntegration" constructor="ApiFieldMapper" version="0.0.42" display-name-key="ApiFieldMapper" description-key="ApiFieldMapper description" control-type="standard">
+  <control namespace="AIIntegration" constructor="ApiFieldMapper" version="0.0.46" display-name-key="ApiFieldMapper" description-key="ApiFieldMapper description" control-type="standard">
     <!--external-service-usage node declares whether this 3rd party PCF control is using external service or not, if yes, this control will be considered as premium and please also add the external domain it is using.
     If it is not using any external service, please set the enabled="false" and DO NOT add any domain below. The "enabled" will be false by default.
     Example1:
@@ -20,67 +20,68 @@
       <type>Multiple</type>
     </type-group>
     <!-- property node identifies a specific, configurable piece of data that the control expects from CDS -->
-    <property name="BoundField" display-name-key="BoundField_Display_Key" description-key="BoundField to bound put the PCF on top of " of-type="SingleLine.Text" usage="bound" required="true" />
-    <property name="inputValue" display-name-key="Input_Value_Display_Key" description-key="Input_Value_Desc_Key" of-type="SingleLine.Text" usage="input" required="false" />
-    <property name="caseDetails" display-name-key="Case_Details_Display_Key" description-key="Case details used to generate the AI prompt" of-type-group="textValues" usage="input" required="false" />
-    <property name="providerName" display-name-key="Provider_Name_Display_Key" description-key="Service provider used to generate the AI prompt. Option sets are sent by label." of-type="OptionSet" usage="input" required="false" />
-    <property name="providerResponse" display-name-key="Provider_Response_Display_Key" description-key="Service provider response used to generate the AI prompt" of-type-group="textValues" usage="input" required="false" />
-    <property name="apiEndpoint" display-name-key="Api_Endpoint_Display_Key" description-key="Api_Endpoint_Desc_Key" of-type="SingleLine.URL" usage="input" required="true" />
-    <property name="requestMethod" display-name-key="Request_Method_Display_Key" description-key="Request_Method_Desc_Key" of-type="SingleLine.Text" usage="input" required="false" />
-    <property name="requestTemplate" display-name-key="Request_Template_Display_Key" description-key="Request_Template_Desc_Key" of-type="Multiple" usage="input" required="false" />
-    <property name="headersJson" display-name-key="Headers_Json_Display_Key" description-key="Headers_Json_Desc_Key" of-type="Multiple" usage="input" required="false" />
-    <property name="apiVersion" display-name-key="Api_Version_Display_Key" description-key="Api_Version_Desc_Key" of-type="SingleLine.Text" usage="input" required="false" />
-    <property name="includeLegalNoteText" display-name-key="Include_Legal_Note_Text_Display_Key" description-key="Include_Legal_Note_Text_Desc_Key" of-type="TwoOptions" usage="input" required="false" />
-    <property name="isdevleopment" display-name-key="Is_Development" description-key="Used to specify whether you want to display the UI in the Dev mode or not" of-type="Enum" usage="input" required="false" default-value="false">
-      <value name="Production" display-name-key="Production" description-key="Hides returned JSON span and optionset numbers">false</value>
-      <value name="Development" display-name-key="Development" description-key="Shows returned JSON span and optionset numbers">true</value>
+    <property name="BoundField" display-name-key="Bound Field" description-key="Host text field used to place and bind the PCF control on the form." of-type="SingleLine.Text" usage="bound" required="true" />
+    <property name="inputValue" display-name-key="Prompt Override" description-key="Optional direct prompt sent to the AI endpoint. When populated, it takes priority over the generated CRM-field prompt." of-type="SingleLine.Text" usage="input" required="false" />
+    <property name="caseDetails" display-name-key="Case Details" description-key="Case details text used to build the generated AI prompt when Prompt Override is empty." of-type-group="textValues" usage="input" required="false" />
+    <property name="providerName" display-name-key="Service Provider" description-key="Service provider option set used in the generated AI prompt. The option label is sent instead of the numeric value." of-type="OptionSet" usage="input" required="false" />
+    <property name="providerResponse" display-name-key="Service Provider Response" description-key="Service provider response text used to build the generated AI prompt when Prompt Override is empty." of-type-group="textValues" usage="input" required="false" />
+    <property name="apiEndpoint" display-name-key="API Endpoint" description-key="URL of the Dataverse custom API or external endpoint called to generate the AI recommendation. Required unless Testing Response JSON is populated." of-type="SingleLine.URL" usage="input" required="false" />
+    <property name="testingResponseJson" display-name-key="Testing Response JSON" description-key="Optional raw JSON response used for testing the PCF parser and UI without calling the API endpoint. When populated, Generate uses this value as the returned response." of-type="Multiple" usage="input" required="false" />
+    <property name="requestMethod" display-name-key="Request Method" description-key="HTTP method used for the AI endpoint call. Supported values are GET, POST, PUT, and PATCH. Defaults to POST." of-type="SingleLine.Text" usage="input" required="false" />
+    <property name="requestTemplate" display-name-key="Request Template" description-key="Optional JSON body template for the AI endpoint. Template tokens such as CaseId and inputText are replaced before sending." of-type="Multiple" usage="input" required="false" />
+    <property name="headersJson" display-name-key="Headers JSON" description-key="Optional JSON object containing additional HTTP headers to send with the AI request." of-type="Multiple" usage="input" required="false" />
+    <property name="apiVersion" display-name-key="API Version" description-key="Version value sent in the x-api-version header. Defaults to 1.0 when empty." of-type="SingleLine.Text" usage="input" required="false" />
+    <property name="includeLegalNoteText" display-name-key="Include Legal Note Text" description-key="Controls whether legal note text is requested from the AI endpoint when the request template uses this flag." of-type="TwoOptions" usage="input" required="false" />
+    <property name="isdevleopment" display-name-key="Is Development Mode" description-key="Controls whether development-only UI sections and console logs are shown." of-type="Enum" usage="input" required="false" default-value="false">
+      <value name="Production" display-name-key="Production" description-key="Hides raw returned JSON, option-set numeric values, and debug console logs.">false</value>
+      <value name="Development" display-name-key="Development" description-key="Shows raw returned JSON, option-set numeric values, and debug console logs.">true</value>
     </property>
-    <property name="includeLegalNotes" display-name-key="Include_Legal_Notes_Display_Key" description-key="Controls whether returned legal notes are created and associated to the Case" of-type="Enum" usage="input" required="false" default-value="false">
-      <value name="DoNotInclude" display-name-key="Do_Not_Include_Legal_Notes" description-key="Do not create or associate returned legal notes">false</value>
-      <value name="Include" display-name-key="Include_Legal_Notes" description-key="Create and associate returned legal notes when the AI decision is Assess case">true</value>
+    <property name="includeLegalNotes" display-name-key="Include Legal Notes" description-key="Controls whether returned legal notes are created and associated to the Case when the AI decision is Assess Dispute." of-type="Enum" usage="input" required="false" default-value="false">
+      <value name="DoNotInclude" display-name-key="Do Not Include Legal Notes" description-key="Do not create or associate returned legal notes.">false</value>
+      <value name="Include" display-name-key="Include Legal Notes" description-key="Create and associate returned legal notes when the AI decision is Assess Dispute.">true</value>
     </property>
-    <property name="isBpfHandled" display-name-key="Is_BPF_Handled" description-key="Controls whether the PCF checks the current Business Process Flow stage before running" of-type="Enum" usage="input" required="false" default-value="false">
-      <value name="No" display-name-key="No" description-key="Do not check the Business Process Flow stage">false</value>
-      <value name="Yes" display-name-key="Yes" description-key="Check the Business Process Flow stage before enabling the PCF">true</value>
+    <property name="isBpfHandled" display-name-key="Enable BPF Stage Handling" description-key="Controls whether the PCF checks the current Business Process Flow stage before allowing actions." of-type="Enum" usage="input" required="false" default-value="false">
+      <value name="No" display-name-key="No" description-key="Do not check the Business Process Flow stage.">false</value>
+      <value name="Yes" display-name-key="Yes" description-key="Check the Business Process Flow stage before enabling PCF actions.">true</value>
     </property>
-    <property name="allowUnsupportedFormRefresh" display-name-key="Allow_Unsupported_Form_Refresh_Display_Key" description-key="Allows the PCF to refresh the CRM form through unsupported Xrm.Page APIs after Accept, Modify, or Reject. Set manually to Yes only when needed." of-type="Enum" usage="input" required="false" default-value="false">
+    <property name="allowUnsupportedFormRefresh" display-name-key="Allow Unsupported Form Refresh" description-key="Allows the PCF to refresh the CRM form through unsupported Xrm.Page APIs after Accept, Modify, or Reject. Set to Yes only when needed." of-type="Enum" usage="input" required="false" default-value="false">
       <value name="No" display-name-key="No" description-key="Do not use unsupported form refresh">false</value>
       <value name="Yes" display-name-key="Yes" description-key="Use unsupported Xrm.Page form refresh after user actions">true</value>
     </property>
-    <property name="bpfEntityName" display-name-key="BPF_Entity_Name_Display_Key" description-key="Business Process Flow table logical name. Accepts a single input." of-type="SingleLine.Text" usage="input" required="false" />
-    <property name="bpfCaseLookupFieldName" display-name-key="BPF_Case_Lookup_Field_Name_Display_Key" description-key="Business Process Flow lookup field logical name to Case. Accepts a single input." of-type="SingleLine.Text" usage="input" required="false" />
-    <property name="allowedBpfStageNames" display-name-key="Allowed_BPF_Stage_Names_Display_Key" description-key="Business Process Flow stage names where the PCF is allowed to run. Accepts comma-separated inputs or a single input." of-type-group="textValues" usage="input" required="false" />
-    <property name="resultPath" display-name-key="Result_Path_Display_Key" description-key="Result_Path_Desc_Key" of-type="SingleLine.Text" usage="input" required="false" />
+    <property name="bpfEntityName" display-name-key="BPF Table Logical Name" description-key="Logical name of the Business Process Flow table used to check the active stage. Accepts a single input." of-type="SingleLine.Text" usage="input" required="false" />
+    <property name="bpfCaseLookupFieldName" display-name-key="BPF Case Lookup Field" description-key="Logical name of the BPF lookup field that links the BPF instance to the Case. Accepts a single input." of-type="SingleLine.Text" usage="input" required="false" />
+    <property name="allowedBpfStageNames" display-name-key="Allowed BPF Stage Names" description-key="Business Process Flow stage names where the PCF is allowed to run. Accepts comma-separated inputs or a single input." of-type-group="textValues" usage="input" required="false" />
+    <property name="resultPath" display-name-key="Result Path" description-key="Optional JSON path used to read a specific value from the AI response when no standard feedback field is returned." of-type="SingleLine.Text" usage="input" required="false" />
     <!-- Unused behavior flags; kept commented to reduce the configuration shown in maker UI.
-    <property name="autoRunOnLoad" display-name-key="Auto_Run_On_Load_Display_Key" description-key="Auto_Run_On_Load_Desc_Key" of-type="TwoOptions" usage="input" required="false" />
-    <property name="triggerOnValueChange" display-name-key="Trigger_On_Value_Change_Display_Key" description-key="Trigger_On_Value_Change_Desc_Key" of-type="TwoOptions" usage="input" required="false" />
+    <property name="autoRunOnLoad" display-name-key="Auto Run on Load" description-key="Automatically generate an AI recommendation when the control loads." of-type="TwoOptions" usage="input" required="false" />
+    <property name="triggerOnValueChange" display-name-key="Trigger on Value Change" description-key="Automatically regenerate when the bound input value changes." of-type="TwoOptions" usage="input" required="false" />
     -->
-    <property name="decisionByAI" display-name-key="Decision_By_AI_Display_Key" description-key="Decision_By_AI_Desc_Key" of-type="OptionSet" usage="bound" required="false" />
-    <property name="customerCallSuggestionInstructionsByAI" display-name-key="Customer_Call_Suggestion_Instructions_By_AI_Display_Key" description-key="Customer_Call_Suggestion_Instructions_By_AI_Desc_Key" of-type="Multiple" usage="bound" required="false" />
-    <property name="validationByAI" display-name-key="Validation_By_AI_Display_Key" description-key="Validation_By_AI_Desc_Key" of-type="OptionSet" usage="bound" required="false" />
-    <property name="invalidReason" display-name-key="Invalid_Reason_Display_Key" description-key="Invalid_Reason_Desc_Key" of-type="OptionSet" usage="bound" required="false" />
-    <property name="closedInFavorOf" display-name-key="Closed_In_Favor_Of_Display_Key" description-key="Closed_In_Favor_Of_Desc_Key" of-type="OptionSet" usage="bound" required="false" />
-    <property name="routeToSPReasons" display-name-key="Route_To_SP_Reasons_Display_Key" description-key="Route_To_SP_Reasons_Desc_Key" of-type="Multiple" usage="bound" required="false" />
-    <property name="assessDisputeComment" display-name-key="Assess_Dispute_Comment_Display_Key" description-key="Comment field populated only when the AI decision is Assess Dispute" of-type-group="textValues" usage="bound" required="false" />
-    <property name="routeToServiceProviderComment" display-name-key="Route_To_Service_Provider_Comment_Display_Key" description-key="Comment field populated only when the AI decision is Route to Service Provider" of-type-group="textValues" usage="bound" required="false" />
-    <property name="routeToDepartmentComment" display-name-key="Route_To_Department_Comment_Display_Key" description-key="Comment field populated only when the AI decision is Route to Department" of-type-group="textValues" usage="bound" required="false" />
-    <property name="escalateToLeadComment" display-name-key="Escalate_To_Lead_Comment_Display_Key" description-key="Comment field populated only when the AI decision is Escalate to Lead" of-type-group="textValues" usage="bound" required="false" />
-    <property name="suggestedComment" display-name-key="Suggested_Comment_Display_Key" description-key="Suggested_Comment_Desc_Key" of-type="Multiple" usage="bound" required="false" />
-    <property name="suggestedDecision" display-name-key="Suggested_Decision_Display_Key" description-key="Suggested_Decision_Desc_Key" of-type="SingleLine.Text" usage="bound" required="false" />
-    <property name="legalNotesJson" display-name-key="Legal_Notes_Json_Display_Key" description-key="Legal_Notes_Json_Desc_Key" of-type="Multiple" usage="bound" required="false" />
-    <property name="correlationId" display-name-key="Correlation_Id_Display_Key" description-key="Correlation_Id_Desc_Key" of-type="SingleLine.Text" usage="bound" required="false" />
-    <property name="resultText" display-name-key="Result_Text_Display_Key" description-key="Result_Text_Desc_Key" of-type="SingleLine.Text" usage="bound" required="false" />
-    <property name="resultJson" display-name-key="Result_Json_Display_Key" description-key="Result_Json_Desc_Key" of-type="Multiple" usage="bound" required="false" />
-    <property name="statusText" display-name-key="Status_Text_Display_Key" description-key="Status_Text_Desc_Key" of-type="SingleLine.Text" usage="bound" required="false" />
-    <property name="lastRunOn" display-name-key="Last_Run_On_Display_Key" description-key="Last_Run_On_Desc_Key" of-type="DateAndTime.DateAndTime" usage="bound" required="false" />
-    <property name="feedbackByAI" display-name-key="Feedback_By_AI_Display_Key" description-key="Feedback_By_AI_Desc_Key" of-type="Multiple" usage="bound" required="false" />
-    <property name="reservedDecisionByAI" display-name-key="Reserved_Decision_By_AI_Display_Key" description-key="Stores the last AI decision for persistent PCF display" of-type="OptionSet" usage="bound" required="false" />
-    <property name="reservedFeedbackByAI" display-name-key="Reserved_Feedback_By_AI_Display_Key" description-key="Stores the last AI feedback for persistent PCF display" of-type="Multiple" usage="bound" required="false" />
-    <property name="reservedValidationByAI" display-name-key="Reserved_Validation_By_AI_Display_Key" description-key="Stores the last AI validation for persistent PCF display" of-type="OptionSet" usage="bound" required="false" />
-    <property name="reservedInvalidReasonByAI" display-name-key="Reserved_Invalid_Reason_By_AI_Display_Key" description-key="Stores the last AI invalid reason for persistent PCF display" of-type="OptionSet" usage="bound" required="false" />
-    <property name="reservedCustomerCallSuggestionInstructionsByAI" display-name-key="Reserved_Customer_Call_Suggestion_Instructions_By_AI_Display_Key" description-key="Stores the last AI customer call suggestion instructions for persistent PCF display" of-type="Multiple" usage="bound" required="false" />
-    <property name="reservedClosedInFavorOfByAI" display-name-key="Reserved_Closed_In_Favor_Of_By_AI_Display_Key" description-key="Stores the last AI closed in favor of value for persistent PCF display" of-type="OptionSet" usage="bound" required="false" />
-    <property name="aiReviewStatusLabel" display-name-key="AI_Review_Status_Label_Display_Key" description-key="Stores the last AI review action label: Accepted, Modified, or Rejected" of-type="SingleLine.Text" usage="bound" required="false" />
+    <property name="decisionByAI" display-name-key="Decision by AI" description-key="Bound option set field populated with the AI decision value after Accept or Modify." of-type="OptionSet" usage="bound" required="false" />
+    <property name="customerCallSuggestionInstructionsByAI" display-name-key="Customer Call Suggestion Instructions by AI" description-key="Bound multiline field populated with AI customer call instructions when returned by the endpoint." of-type="Multiple" usage="bound" required="false" />
+    <property name="validationByAI" display-name-key="Validation by AI" description-key="Bound option set field populated with the AI validation value only when the AI decision is Assess Dispute." of-type="OptionSet" usage="bound" required="false" />
+    <property name="invalidReason" display-name-key="Invalid Reason by AI" description-key="Bound option set field populated with the AI invalid reason only when validation is Invalid." of-type="OptionSet" usage="bound" required="false" />
+    <property name="closedInFavorOf" display-name-key="Closed in Favor of by AI" description-key="Bound option set field populated with who the case should close in favor of when the AI decision is Assess Dispute." of-type="OptionSet" usage="bound" required="false" />
+    <property name="routeToSPReasons" display-name-key="Route to Service Provider Reason" description-key="Bound lookup field populated with the AI route-to-service-provider reason returned in RouteToSPReasonsJson." of-type="Lookup.Simple" usage="bound" required="false" />
+    <property name="assessDisputeComment" display-name-key="Assess Dispute Comment" description-key="Bound comment field populated only when the AI decision is Assess Dispute." of-type-group="textValues" usage="bound" required="false" />
+    <property name="routeToServiceProviderComment" display-name-key="Route to Service Provider Comment" description-key="Bound comment field populated only when the AI decision is Route to Service Provider." of-type-group="textValues" usage="bound" required="false" />
+    <property name="routeToDepartmentComment" display-name-key="Route to Department Comment" description-key="Bound comment field populated only when the AI decision is Route to Department." of-type-group="textValues" usage="bound" required="false" />
+    <property name="escalateToLeadComment" display-name-key="Escalate to Lead Comment" description-key="Bound comment field populated only when the AI decision is Escalate to Lead." of-type-group="textValues" usage="bound" required="false" />
+    <property name="suggestedComment" display-name-key="Suggested Comment" description-key="Bound multiline field populated with the AI feedback text for compatibility with older mappings." of-type="Multiple" usage="bound" required="false" />
+    <property name="suggestedDecision" display-name-key="Suggested Decision" description-key="Bound text field populated with the AI decision label for compatibility with older mappings." of-type="SingleLine.Text" usage="bound" required="false" />
+    <property name="legalNotesJson" display-name-key="Legal Notes JSON" description-key="Bound multiline field populated with the legal notes JSON returned by the AI endpoint." of-type="Multiple" usage="bound" required="false" />
+    <property name="correlationId" display-name-key="Correlation ID" description-key="Bound text field populated with the request correlation ID used for tracing the AI call." of-type="SingleLine.Text" usage="bound" required="false" />
+    <property name="resultText" display-name-key="Result Text" description-key="Bound text field populated with the main AI response text for compatibility with older mappings." of-type="SingleLine.Text" usage="bound" required="false" />
+    <property name="resultJson" display-name-key="Result JSON" description-key="Bound multiline field populated with the full formatted AI response JSON." of-type="Multiple" usage="bound" required="false" />
+    <property name="statusText" display-name-key="Status Text" description-key="Bound text field populated with the latest PCF status message." of-type="SingleLine.Text" usage="bound" required="false" />
+    <property name="lastRunOn" display-name-key="Last Run On" description-key="Bound date and time field populated with when the AI recommendation was generated." of-type="DateAndTime.DateAndTime" usage="bound" required="false" />
+    <property name="feedbackByAI" display-name-key="Feedback by AI" description-key="Bound multiline field populated with the AI feedback that should be reflected on the Case." of-type="Multiple" usage="bound" required="false" />
+    <property name="reservedDecisionByAI" display-name-key="Reserved Decision by AI" description-key="Bound option set field that stores the last AI decision for persistent PCF display." of-type="OptionSet" usage="bound" required="false" />
+    <property name="reservedFeedbackByAI" display-name-key="Reserved Feedback by AI" description-key="Bound multiline field that stores the last AI feedback for persistent PCF display." of-type="Multiple" usage="bound" required="false" />
+    <property name="reservedValidationByAI" display-name-key="Reserved Validation by AI" description-key="Bound option set field that stores the last AI validation for persistent PCF display." of-type="OptionSet" usage="bound" required="false" />
+    <property name="reservedInvalidReasonByAI" display-name-key="Reserved Invalid Reason by AI" description-key="Bound option set field that stores the last AI invalid reason for persistent PCF display." of-type="OptionSet" usage="bound" required="false" />
+    <property name="reservedCustomerCallSuggestionInstructionsByAI" display-name-key="Reserved Customer Call Suggestion Instructions by AI" description-key="Bound multiline field that stores the last AI customer call instructions for persistent PCF display." of-type="Multiple" usage="bound" required="false" />
+    <property name="reservedClosedInFavorOfByAI" display-name-key="Reserved Closed in Favor of by AI" description-key="Bound option set field that stores the last AI closed-in-favor-of value for persistent PCF display." of-type="OptionSet" usage="bound" required="false" />
+    <property name="aiReviewStatusLabel" display-name-key="AI Review Status Label" description-key="Bound text field that stores the last user action taken on the AI recommendation: Accepted, Modified, or Rejected." of-type="SingleLine.Text" usage="bound" required="false" />
     <!--
       Property node's of-type attribute can be of-type-group attribute.
       Example:
@@ -90,7 +91,7 @@
         <type>FP</type>
         <type>Decimal</type>
       </type-group>
-      <property name="sampleProperty" display-name-key="Property_Display_Key" description-key="Property_Desc_Key" of-type-group="numbers" usage="bound" required="true" />
+      <property name="sampleProperty" display-name-key="Sample Property" description-key="Example bound property used to show how type groups can be referenced." of-type-group="numbers" usage="bound" required="true" />
     -->
     <resources>
       <code path="index.ts" order="1" />

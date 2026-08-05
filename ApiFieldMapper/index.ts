@@ -1,9 +1,12 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { IInputs, IOutputs } from "./generated/ManifestTypes";
 import {
     AdvisorSuggestionViewModel,
     ApiFieldMapperView,
     ApiFieldMapperViewProps,
     LegalNoteViewModel,
+    LookupItemViewModel,
     OptionSetItemViewModel
 } from "./ApiFieldMapperView";
 import * as React from "react";
@@ -79,8 +82,8 @@ interface AgentCommentOutputGate {
     token: number;
 }
 
-type OutputValue = Date | number | string | undefined;
-type RejectOutputValue = Date | number | string | null;
+type OutputValue = ComponentFramework.LookupValue[] | Date | number | string | undefined;
+type RejectOutputValue = ComponentFramework.LookupValue[] | Date | number | string | null;
 type OutputSnapshot = Partial<Record<keyof IOutputs, OutputValue>>;
 type RejectOutputPacket = Partial<Record<keyof IOutputs, RejectOutputValue>>;
 
@@ -230,7 +233,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     private resultJson?: string;
     private resultText?: string;
     private routeToDepartmentComment?: string;
-    private routeToSPReasons?: string;
+    private routeToSPReasons?: ComponentFramework.LookupValue[];
     private routeToServiceProviderComment?: string;
     private serviceProviderOptionLabels?: Record<number, string>;
     private serviceProviderOptionLabelsPromise?: Promise<Record<number, string> | undefined>;
@@ -288,6 +291,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         void this.refreshOwnerGate(context);
         const sourceValue = context.parameters.inputValue.raw ?? "";
         const apiEndpoint = this.getApiEndpoint(context);
+        const testingResponseJson = this.getTestingResponseJson(context);
 
         // this.tryInitialGenerate(context);
 
@@ -300,7 +304,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             canReview: this.hasPendingResult(),
             canTakeActions: this.isCurrentRecordOwner,
             displaySuggestion: this.persistedSuggestion,
-            endpointConfigured: Boolean(apiEndpoint),
+            endpointConfigured: Boolean(apiEndpoint || testingResponseJson),
             errorMessage: this.errorMessage,
             isDevelopment: this.getIsDevelopment(context),
             isDisabled: this.isBpfDisabled,
@@ -415,7 +419,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.validationByAI = context.parameters.validationByAI.raw ?? undefined;
         this.invalidReason = context.parameters.invalidReason.raw ?? undefined;
         this.closedInFavorOf = context.parameters.closedInFavorOf.raw ?? undefined;
-        this.routeToSPReasons = context.parameters.routeToSPReasons.raw ?? undefined;
+        this.routeToSPReasons = this.readLookupOutput(context.parameters.routeToSPReasons.raw);
         this.assessDisputeComment = context.parameters.assessDisputeComment.raw ?? undefined;
         this.routeToServiceProviderComment = context.parameters.routeToServiceProviderComment.raw ?? undefined;
         this.routeToDepartmentComment = context.parameters.routeToDepartmentComment.raw ?? undefined;
@@ -569,6 +573,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     private async generateResult(context: ComponentFramework.Context<IInputs>): Promise<void> {
         const apiEndpoint = this.getApiEndpoint(context);
         const method = this.getMethod(context);
+        const testingResponseJson = this.getTestingResponseJson(context);
         const identifiers = this.createRequestIdentifiers();
         const generationId = this.activeGenerationId + 1;
         this.rejectOutputPacket = undefined;
@@ -588,17 +593,18 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             apiEndpoint,
             apiRequestId: identifiers.apiRequestId,
             correlationId: identifiers.correlationId,
+            hasTestingResponseJson: Boolean(testingResponseJson),
             method,
             inputTextLength: this.getInputText(context).length
         });
 
-        if (!apiEndpoint) {
+        if (!testingResponseJson && !apiEndpoint) {
             this.setError("API endpoint is not configured.", false);
             this.publishState(context);
             return;
         }
 
-        if (!this.getInputText(context)) {
+        if (!testingResponseJson && !this.getInputText(context)) {
             this.setError("Prompt input is missing. Bind Case Details, Provider Name, Provider Response, or enter inputValue.", false);
             this.publishState(context);
             return;
@@ -619,6 +625,25 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.publishState(context);
 
         try {
+            if (testingResponseJson) {
+                const responseData = this.parseTestingResponseJson(testingResponseJson);
+
+                if (!this.isCurrentGeneration(generationId)) {
+                    this.log("stale testing response ignored", {
+                        generationId
+                    });
+                    return;
+                }
+
+                const suggestion = this.buildPendingSuggestion(responseData, testingResponseJson, identifiers, context);
+                this.pendingSuggestion = suggestion;
+                this.pendingResultText = suggestion.suggestedComment ?? "";
+                this.pendingResultJson = suggestion.rawJson;
+                this.statusText = "Preview generated from testing response. Review it before choosing an action.";
+                this.log("preview suggestion ready from testing response", this.toSuggestionLog(suggestion));
+                return;
+            }
+
             const url = this.buildUrl(apiEndpoint, context, identifiers);
             const body = this.buildBody(context, identifiers);
             const headers = this.buildHeaders(context, identifiers, method);
@@ -735,7 +760,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.rejectOutputPacket = undefined;
         this.captureCommentOutputSnapshot();
         this.captureAppliedOutputSnapshot(context);
-        this.applySuggestionToOutputs(suggestion);
+        this.applySuggestionToOutputs(suggestion, context);
         this.applyPersistedSuggestionOutputs(suggestion, "Accepted");
         this.logOutputBindings(context, "accept after apply", suggestion);
         this.prepareAgentCommentOutputGate(context, suggestion, "accept");
@@ -795,37 +820,16 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.rejectOutputPacket = undefined;
         this.captureCommentOutputSnapshot();
         this.captureAppliedOutputSnapshot(context);
-        this.applySuggestionToOutputs(suggestion);
+        this.applySuggestionToOutputs(suggestion, context);
         this.applyPersistedSuggestionOutputs(suggestion, "Modified");
         this.logOutputBindings(context, "modify after apply", suggestion);
         this.prepareAgentCommentOutputGate(context, suggestion, "modify");
         this.errorMessage = undefined;
-        this.isLoading = true;
-        this.statusText = "Modify applied. Associating legal notes...";
+        this.statusText = "Modify applied. Review the returned AI data and edit the form fields before saving.";
         this.publishState(context);
-
-        try {
-            const associatedCount = await this.associateLegalNotesToCurrentRecord(context, suggestion);
-            const savedReviewState = await this.saveReservedReviewState(context);
-            await this.tryUnsupportedFormRefresh(context, "modify");
-            this.statusText = associatedCount > 0
-                ? `Modify applied. ${associatedCount} legal note(s) associated to the Case.`
-                : "Modify applied. Review the returned AI data and edit the form fields before saving.";
-            this.log("modify completed", {
-                associatedCount,
-                savedReviewState,
-                statusText: this.statusText
-            });
-        } catch (error) {
-            this.errorMessage = (error as Error).message;
-            this.statusText = `Modify applied locally, but legal note association failed: ${(error as Error).message}`;
-            this.log("modify legal note association failed", {
-                error: (error as Error).message
-            });
-        } finally {
-            this.isLoading = false;
-            this.publishState(context);
-        }
+        this.log("modify completed without auto save", {
+            statusText: this.statusText
+        });
     }
 
     private async rejectPendingResult(context: ComponentFramework.Context<IInputs>): Promise<void> {
@@ -879,7 +883,10 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.publishState(context);
     }
 
-    private applySuggestionToOutputs(suggestion: PendingSuggestion): void {
+    private applySuggestionToOutputs(
+        suggestion: PendingSuggestion,
+        context: ComponentFramework.Context<IInputs>
+    ): void {
         const legalNotesJson = JSON.stringify(suggestion.legalNotes, null, 2);
         const feedback = suggestion.feedbackByAI ?? suggestion.suggestedComment ?? "";
         const decisionLabel = this.formatOptionSetLabel(suggestion.decisionByAI)
@@ -895,7 +902,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             ? suggestion.invalidReason?.value
             : undefined;
         this.closedInFavorOf = shouldApplyAssessOnlyFields ? suggestion.closedInFavorOf?.value : undefined;
-        this.routeToSPReasons = suggestion.routeToSPReasons;
+        this.routeToSPReasons = this.buildRouteToSPReasonLookupOutput(context, suggestion.routeToSPReason);
         this.applyDecisionComment(suggestion, feedback);
         this.suggestedComment = feedback;
         this.suggestedDecision = decisionLabel;
@@ -1025,7 +1032,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.validationByAI = snapshot.validationByAI as number | undefined;
         this.invalidReason = snapshot.invalidReason as number | undefined;
         this.closedInFavorOf = snapshot.closedInFavorOf as number | undefined;
-        this.routeToSPReasons = snapshot.routeToSPReasons as string | undefined;
+        this.routeToSPReasons = snapshot.routeToSPReasons as ComponentFramework.LookupValue[] | undefined;
         this.assessDisputeComment = snapshot.assessDisputeComment as string | undefined;
         this.routeToServiceProviderComment = snapshot.routeToServiceProviderComment as string | undefined;
         this.routeToDepartmentComment = snapshot.routeToDepartmentComment as string | undefined;
@@ -1246,7 +1253,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         const contextInfo = this.getContextInfo(context);
         const recordId = this.cleanGuid(contextInfo?.entityId ?? "");
         const entityName = contextInfo?.entityTypeName;
-        const payload = this.buildDataversePayload(context, suggestion);
+        const payload = await this.buildDataversePayload(context, suggestion);
 
         this.log("save payload prepared", {
             entityName,
@@ -1275,10 +1282,10 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         };
     }
 
-    private buildDataversePayload(
+    private async buildDataversePayload(
         context: ComponentFramework.Context<IInputs>,
         suggestion: PendingSuggestion
-    ): ComponentFramework.WebApi.Entity {
+    ): Promise<ComponentFramework.WebApi.Entity> {
         const payload: ComponentFramework.WebApi.Entity = {};
         const shouldSaveAssessOnlyFields = this.isAssessCaseDecision(suggestion);
 
@@ -1300,7 +1307,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             this.addBoundOptionSetValue(payload, context.parameters.closedInFavorOf, this.closedInFavorOf);
         }
 
-        this.addBoundTextValue(payload, context.parameters.routeToSPReasons, this.routeToSPReasons);
+        await this.addBoundLookupValue(payload, context, context.parameters.routeToSPReasons, this.routeToSPReasons);
         this.addDecisionCommentToPayload(payload, context, suggestion);
         this.addBoundTextValue(payload, context.parameters.suggestedComment, this.suggestedComment);
         this.addBoundTextValue(payload, context.parameters.suggestedDecision, this.suggestedDecision);
@@ -1766,6 +1773,39 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         payload[logicalName] = value ?? null;
     }
 
+    private async addBoundLookupValue(
+        payload: ComponentFramework.WebApi.Entity,
+        context: ComponentFramework.Context<IInputs>,
+        parameter: ComponentFramework.PropertyTypes.LookupProperty,
+        value: ComponentFramework.LookupValue[] | undefined
+    ): Promise<void> {
+        const logicalName = parameter.attributes?.LogicalName;
+
+        if (!logicalName) {
+            return;
+        }
+
+        const lookupValue = value?.[0];
+
+        if (!lookupValue?.id) {
+            payload[`${logicalName}@odata.bind`] = null;
+            return;
+        }
+
+        const entityType = lookupValue.entityType || this.getLookupParameterTargetEntityType(parameter);
+
+        if (!entityType) {
+            this.log("lookup payload skipped: missing target entity type", {
+                logicalName,
+                lookupValue
+            });
+            return;
+        }
+
+        const entitySetName = await this.getEntitySetName(context, entityType, `${entityType}s`);
+        payload[`${logicalName}@odata.bind`] = `/${entitySetName}(${this.cleanGuid(lookupValue.id)})`;
+    }
+
     private async addLookupBind(
         context: ComponentFramework.Context<IInputs>,
         payload: ComponentFramework.WebApi.Entity,
@@ -1955,6 +1995,10 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         return configuredEndpoint && configuredEndpoint.length > 0 ? configuredEndpoint : this.defaultApiEndpoint;
     }
 
+    private getTestingResponseJson(context: ComponentFramework.Context<IInputs>): string {
+        return context.parameters.testingResponseJson.raw?.trim() ?? "";
+    }
+
     private getCaseRequestId(context: ComponentFramework.Context<IInputs>): string {
         return this.getCurrentRecordId(context);
     }
@@ -1964,13 +2008,13 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     }
 
     private getInputText(context: ComponentFramework.Context<IInputs>): string {
-        const generatedPrompt = this.getGeneratedPrompt(context);
+        const directInput = context.parameters.inputValue.raw?.trim();
 
-        if (generatedPrompt) {
-            return generatedPrompt;
+        if (directInput) {
+            return directInput;
         }
 
-        return context.parameters.inputValue.raw?.trim() ?? "";
+        return this.getGeneratedPrompt(context);
     }
 
     private getGeneratedPrompt(context: ComponentFramework.Context<IInputs>): string {
@@ -2440,6 +2484,60 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         return this.cleanGuid(userSettings.userId ?? "");
     }
 
+    private readLookupOutput(value: unknown): ComponentFramework.LookupValue[] | undefined {
+        if (!Array.isArray(value) || value.length === 0) {
+            return undefined;
+        }
+
+        return value
+            .filter((item): item is ComponentFramework.LookupValue => (
+                this.isRecord(item)
+                && typeof item.id === "string"
+                && typeof item.entityType === "string"
+            ));
+    }
+
+    private buildRouteToSPReasonLookupOutput(
+        context: ComponentFramework.Context<IInputs>,
+        lookupItem: LookupItemViewModel | undefined
+    ): ComponentFramework.LookupValue[] | undefined {
+        const id = this.cleanGuid(lookupItem?.id ?? "");
+
+        if (!id) {
+            return undefined;
+        }
+
+        const entityType = lookupItem?.entityType
+            ?? this.getLookupParameterTargetEntityType(context.parameters.routeToSPReasons)
+            ?? this.routeToSPReasons?.[0]?.entityType;
+
+        if (!entityType) {
+            this.log("route to SP reason lookup output skipped: missing target entity type", {
+                lookupItem
+            });
+            return undefined;
+        }
+
+        return [{
+            entityType,
+            id,
+            name: lookupItem?.name
+        }];
+    }
+
+    private getLookupParameterTargetEntityType(
+        parameter: ComponentFramework.PropertyTypes.LookupProperty
+    ): string | undefined {
+        try {
+            return parameter.getTargetEntityType?.();
+        } catch (error) {
+            this.log("lookup target entity type unavailable", {
+                error: (error as Error).message
+            });
+            return undefined;
+        }
+    }
+
     private getActionDisabledReason(): string | undefined {
         if (this.isOwnerCheckLoading) {
             return "Checking Case owner...";
@@ -2541,6 +2639,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             context.parameters.requestTemplate.raw ?? "",
             context.parameters.headersJson.raw ?? "",
             context.parameters.apiVersion.raw ?? "",
+            this.getTestingResponseJson(context),
             context.parameters.includeLegalNoteText.raw === true ? "true" : "false",
             this.getShouldAssociateLegalNotes(context) ? "true" : "false",
             this.getIsBpfHandled(context) ? "true" : "false",
@@ -2680,12 +2779,17 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         const invalidReason = this.readInvalidReason(candidate);
         const closedInFavorOf = this.readOptionSetItemFromValueAndLabel(candidate, "CloseInFavorOfValue", "CloseInFavorOf")
             ?? this.readOptionSetItemFromValueAndLabel(candidate, "CloseInFavorOfValue", "CloseinFavorOf")
+            ?? this.readOptionSetItemFromValueAndLabel(candidate, "CloseinFavorOfValue", "CloseinFavorOf")
+            ?? this.readOptionSetItemFromValueAndLabel(candidate, "closeInFavorOfValue", "closeInFavorOf")
             ?? this.readOptionSetItem(candidate, [
             "closedInFavorOf",
             "ClosedInFavorOf",
             "CloseinFavorOf",
             "CloseInFavorOf",
             "CloseInFavorOfValue",
+            "CloseinFavorOfValue",
+            "closeInFavorOf",
+            "closeinFavorOf",
             "closed_in_favor_of"
         ]);
         const feedbackByAI = this.readString(candidate, [
@@ -2705,9 +2809,26 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         const confidence = this.readNumber(candidate, [
             "confidence",
             "Confidence",
+            "ConfidencePercentage",
+            "confidencePercentage",
             "confidenceScore",
             "confidence_score",
             "score"
+        ]);
+        const routeToSPReason = this.readLookupItemFromJson(candidate, [
+            "RouteToSPReasonsJson",
+            "routeToSPReasonsJson",
+            "RouteToSPReasonJson",
+            "routeToSPReasonJson",
+            "route_to_sp_reasons_json",
+            "route_to_sp_reason_json"
+        ]) ?? this.readLookupItem(candidate, [
+            "RouteToSPReason",
+            "routeToSPReason",
+            "RouteToSPReasons",
+            "routeToSPReasons",
+            "routeToSPReasonsLookup",
+            "RouteToSPReasonsLookup"
         ]);
 
         return {
@@ -2733,6 +2854,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
                 "CustomerCallSuggestionInstructionsByAI",
                 "customerCallSuggestion",
                 "customer_call_suggestion",
+                "customerCallInstructions",
+                "CustomerCallInstructions",
                 "callInstructions",
                 "call_instructions"
             ]),
@@ -2748,6 +2871,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
                 "reasoningAnalysis",
                 "reasoning_analysis"
             ]),
+            routeToSPReason,
             routeToSPReasons: this.readString(candidate, [
                 "routeToSPReasons",
                 "RouteToSPReasons",
@@ -2882,6 +3006,73 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         };
     }
 
+    private readLookupItemFromJson(data: unknown, paths: string[]): LookupItemViewModel | undefined {
+        for (const path of paths) {
+            const value = this.readJsonPath(data, path);
+            const parsedValue = this.parseJsonObject(value) ?? value;
+            const lookupItem = this.normalizeLookupItem(parsedValue);
+
+            if (lookupItem) {
+                return lookupItem;
+            }
+        }
+
+        return undefined;
+    }
+
+    private readLookupItem(data: unknown, paths: string[]): LookupItemViewModel | undefined {
+        for (const path of paths) {
+            const lookupItem = this.normalizeLookupItem(this.readJsonPath(data, path));
+
+            if (lookupItem) {
+                return lookupItem;
+            }
+        }
+
+        return undefined;
+    }
+
+    private normalizeLookupItem(value: unknown): LookupItemViewModel | undefined {
+        const parsedValue = this.parseJsonObject(value) ?? value;
+
+        if (!this.isRecord(parsedValue)) {
+            return undefined;
+        }
+
+        const id = this.cleanGuid(this.readString(parsedValue, [
+            "Id",
+            "id",
+            "Value",
+            "value",
+            "LookupId",
+            "lookupId"
+        ]) ?? "");
+        const name = this.readString(parsedValue, [
+            "Name",
+            "name",
+            "Label",
+            "label"
+        ]);
+        const entityType = this.readString(parsedValue, [
+            "EntityType",
+            "entityType",
+            "LogicalName",
+            "logicalName",
+            "EntityLogicalName",
+            "entityLogicalName"
+        ]);
+
+        if (!id && !name) {
+            return undefined;
+        }
+
+        return {
+            entityType,
+            id,
+            name
+        };
+    }
+
     private getContextInfo(context: ComponentFramework.Context<IInputs>): ContextInfo | undefined {
         return (
             context.mode as ComponentFramework.Mode & {
@@ -2942,6 +3133,14 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             return JSON.parse(responseText);
         } catch {
             return responseText;
+        }
+    }
+
+    private parseTestingResponseJson(responseText: string): unknown {
+        try {
+            return JSON.parse(responseText) as unknown;
+        } catch (error) {
+            throw new Error(`Testing Response JSON is not valid JSON: ${(error as Error).message}`);
         }
     }
 
