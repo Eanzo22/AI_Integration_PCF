@@ -1,0 +1,19 @@
+{
+  "@odata.context": "http://10.20.4.51/TraCrm/api/data/v9.1/$metadata#Microsoft.Dynamics.CRM.ldv_CallAzureAgentAIActionResponse",
+  "NeedMoreInfo": true,
+  "Message": "The AI could not generate a reliable recommendation because the case details are missing the customer's complaint summary and the service provider response. Please update those fields and generate again.",
+  "Department1Json": "{}",
+  "RouteToSPReasonsJson": "{}",
+  "InvalidReason": "N/A",
+  "InvalidReasonValue": 0,
+  "LegalNotesJson": "[]",
+  "Validation": null,
+  "ValidationValue": 0,
+  "DecisionValue": 0,
+  "CloseInFavorOfValue": 0,
+  "OutputResult": "{}",
+  "CloseInFavorOf": null,
+  "Decision": null,
+  "Reason": null,
+  "MatchedCasesJson": "[]"
+}

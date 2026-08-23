@@ -1,6 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <manifest>
-  <control namespace="AIIntegration" constructor="ApiFieldMapper" version="0.0.46" display-name-key="ApiFieldMapper" description-key="ApiFieldMapper description" control-type="standard">
+  <control namespace="AIIntegration" constructor="ApiFieldMapper" version="0.0.89" display-name-key="AIIntegration" description-key="AIIntegration PCF FOR TDRA" control-type="standard">
     <!--external-service-usage node declares whether this 3rd party PCF control is using external service or not, if yes, this control will be considered as premium and please also add the external domain it is using.
     If it is not using any external service, please set the enabled="false" and DO NOT add any domain below. The "enabled" will be false by default.
     Example1:
@@ -26,12 +26,16 @@
     <property name="providerName" display-name-key="Service Provider" description-key="Service provider option set used in the generated AI prompt. The option label is sent instead of the numeric value." of-type="OptionSet" usage="input" required="false" />
     <property name="providerResponse" display-name-key="Service Provider Response" description-key="Service provider response text used to build the generated AI prompt when Prompt Override is empty." of-type-group="textValues" usage="input" required="false" />
     <property name="apiEndpoint" display-name-key="API Endpoint" description-key="URL of the Dataverse custom API or external endpoint called to generate the AI recommendation. Required unless Testing Response JSON is populated." of-type="SingleLine.URL" usage="input" required="false" />
-    <property name="testingResponseJson" display-name-key="Testing Response JSON" description-key="Optional raw JSON response used for testing the PCF parser and UI without calling the API endpoint. When populated, Generate uses this value as the returned response." of-type="Multiple" usage="input" required="false" />
+    <property name="testingResponseJson" display-name-key="Testing Response JSON" description-key="Optional raw JSON response used for testing the PCF parser and UI without calling the API endpoint. When populated, Generate uses this value as the returned response." of-type-group="textValues" usage="input" required="false" />
     <property name="requestMethod" display-name-key="Request Method" description-key="HTTP method used for the AI endpoint call. Supported values are GET, POST, PUT, and PATCH. Defaults to POST." of-type="SingleLine.Text" usage="input" required="false" />
     <property name="requestTemplate" display-name-key="Request Template" description-key="Optional JSON body template for the AI endpoint. Template tokens such as CaseId and inputText are replaced before sending." of-type="Multiple" usage="input" required="false" />
     <property name="headersJson" display-name-key="Headers JSON" description-key="Optional JSON object containing additional HTTP headers to send with the AI request." of-type="Multiple" usage="input" required="false" />
     <property name="apiVersion" display-name-key="API Version" description-key="Version value sent in the x-api-version header. Defaults to 1.0 when empty." of-type="SingleLine.Text" usage="input" required="false" />
     <property name="includeLegalNoteText" display-name-key="Include Legal Note Text" description-key="Controls whether legal note text is requested from the AI endpoint when the request template uses this flag." of-type="TwoOptions" usage="input" required="false" />
+    <property name="isDisabled" display-name-key="Is Disabled" description-key="Disables review actions in the AI Advisor while keeping the Generate button available." of-type="Enum" usage="input" required="false" default-value="false">
+      <value name="No" display-name-key="No" description-key="Keep AI Advisor review actions enabled.">false</value>
+      <value name="Yes" display-name-key="Yes" description-key="Disable review actions but allow Generate.">true</value>
+    </property>
     <property name="isdevleopment" display-name-key="Is Development Mode" description-key="Controls whether development-only UI sections and console logs are shown." of-type="Enum" usage="input" required="false" default-value="false">
       <value name="Production" display-name-key="Production" description-key="Hides raw returned JSON, option-set numeric values, and debug console logs.">false</value>
       <value name="Development" display-name-key="Development" description-key="Shows raw returned JSON, option-set numeric values, and debug console logs.">true</value>
@@ -48,9 +52,20 @@
       <value name="No" display-name-key="No" description-key="Do not use unsupported form refresh">false</value>
       <value name="Yes" display-name-key="Yes" description-key="Use unsupported Xrm.Page form refresh after user actions">true</value>
     </property>
+    <property name="applyInvalidReasonRequirement" display-name-key="Apply Invalid Reason Requirement" description-key="Controls whether Accept is blocked when Validation by AI is Invalid and Invalid Reason by AI is empty or invalid." of-type="Enum" usage="input" required="false" default-value="true">
+      <value name="No" display-name-key="No" description-key="Do not block Accept when Invalid Reason by AI is missing.">false</value>
+      <value name="Yes" display-name-key="Yes" description-key="Block Accept when Validation by AI is Invalid and Invalid Reason by AI is missing or invalid.">true</value>
+    </property>
     <property name="bpfEntityName" display-name-key="BPF Table Logical Name" description-key="Logical name of the Business Process Flow table used to check the active stage. Accepts a single input." of-type="SingleLine.Text" usage="input" required="false" />
     <property name="bpfCaseLookupFieldName" display-name-key="BPF Case Lookup Field" description-key="Logical name of the BPF lookup field that links the BPF instance to the Case. Accepts a single input." of-type="SingleLine.Text" usage="input" required="false" />
     <property name="allowedBpfStageNames" display-name-key="Allowed BPF Stage Names" description-key="Business Process Flow stage names where the PCF is allowed to run. Accepts comma-separated inputs or a single input." of-type-group="textValues" usage="input" required="false" />
+    <property name="serviceStatus" display-name-key="Service Status" description-key="Current Case service status lookup. Bind this to ldv_servicestatus so the PCF can detect when Service Provider feedback has moved to Customer Care." of-type="Lookup.Simple" usage="input" required="false" />
+    <property name="serviceStatusFieldName" display-name-key="Service Status Logical Name" description-key="Optional Case service status lookup logical name used for live Web API reads. Defaults to ldv_servicestatus." of-type="SingleLine.Text" usage="input" required="false" />
+    <property name="routeToServiceProviderCount" display-name-key="Route to Service Provider Count" description-key="Current route-to-service-provider counter. Bind this to the Case count field so each route-back can trigger one new auto generation." of-type="Whole.None" usage="input" required="false" />
+    <property name="routeToServiceProviderCountFieldName" display-name-key="Route to Service Provider Count Logical Name" description-key="Optional Case route-to-service-provider count logical name used for live Web API reads. Defaults to ldv_routetoserviceprovidercount." of-type="SingleLine.Text" usage="input" required="false" />
+    <property name="autoGenerateServiceStatusNames" display-name-key="Auto Generate Service Status Names" description-key="Service status names that allow auto generation after Service Provider feedback. Accepts comma-separated inputs or a single input. Defaults to Pending on Customer Care." of-type-group="textValues" usage="input" required="false" />
+    <property name="routeToSPReasonLookupLogicalName" display-name-key="Route to Service Provider Reason Lookup Logical Name" description-key="Optional target table logical name used when emitting the Route to Service Provider Reason lookup output on Modify." of-type="SingleLine.Text" usage="input" required="false" />
+    <property name="department1LookupLogicalName" display-name-key="Department 1 Lookup Logical Name" description-key="Optional target table logical name used when emitting the Department 1 lookup output on Modify." of-type="SingleLine.Text" usage="input" required="false" />
     <property name="resultPath" display-name-key="Result Path" description-key="Optional JSON path used to read a specific value from the AI response when no standard feedback field is returned." of-type="SingleLine.Text" usage="input" required="false" />
     <!-- Unused behavior flags; kept commented to reduce the configuration shown in maker UI.
     <property name="autoRunOnLoad" display-name-key="Auto Run on Load" description-key="Automatically generate an AI recommendation when the control loads." of-type="TwoOptions" usage="input" required="false" />
@@ -62,6 +77,7 @@
     <property name="invalidReason" display-name-key="Invalid Reason by AI" description-key="Bound option set field populated with the AI invalid reason only when validation is Invalid." of-type="OptionSet" usage="bound" required="false" />
     <property name="closedInFavorOf" display-name-key="Closed in Favor of by AI" description-key="Bound option set field populated with who the case should close in favor of when the AI decision is Assess Dispute." of-type="OptionSet" usage="bound" required="false" />
     <property name="routeToSPReasons" display-name-key="Route to Service Provider Reason" description-key="Bound lookup field populated with the AI route-to-service-provider reason returned in RouteToSPReasonsJson." of-type="Lookup.Simple" usage="bound" required="false" />
+    <property name="department1" display-name-key="Department 1" description-key="Bound lookup field populated with the AI Department 1 value returned in Department1Json." of-type="Lookup.Simple" usage="bound" required="false" />
     <property name="assessDisputeComment" display-name-key="Assess Dispute Comment" description-key="Bound comment field populated only when the AI decision is Assess Dispute." of-type-group="textValues" usage="bound" required="false" />
     <property name="routeToServiceProviderComment" display-name-key="Route to Service Provider Comment" description-key="Bound comment field populated only when the AI decision is Route to Service Provider." of-type-group="textValues" usage="bound" required="false" />
     <property name="routeToDepartmentComment" display-name-key="Route to Department Comment" description-key="Bound comment field populated only when the AI decision is Route to Department." of-type-group="textValues" usage="bound" required="false" />
@@ -82,6 +98,8 @@
     <property name="reservedCustomerCallSuggestionInstructionsByAI" display-name-key="Reserved Customer Call Suggestion Instructions by AI" description-key="Bound multiline field that stores the last AI customer call instructions for persistent PCF display." of-type="Multiple" usage="bound" required="false" />
     <property name="reservedClosedInFavorOfByAI" display-name-key="Reserved Closed in Favor of by AI" description-key="Bound option set field that stores the last AI closed-in-favor-of value for persistent PCF display." of-type="OptionSet" usage="bound" required="false" />
     <property name="aiReviewStatusLabel" display-name-key="AI Review Status Label" description-key="Bound text field that stores the last user action taken on the AI recommendation: Accepted, Modified, or Rejected." of-type="SingleLine.Text" usage="bound" required="false" />
+    <property name="lastAutoGeneratedServiceStatus" display-name-key="Last Auto Generated Service Status" description-key="Reserved text field used by the PCF to store the service status GUID already processed by automatic generation." of-type="SingleLine.Text" usage="bound" required="false" />
+    <property name="lastAutoGeneratedRouteToServiceProviderCount" display-name-key="Last Auto Generated Route to Service Provider Count" description-key="Reserved whole number field used by the PCF to remember the route-to-service-provider count already processed by automatic generation." of-type="Whole.None" usage="bound" required="false" />
     <!--
       Property node's of-type attribute can be of-type-group attribute.
       Example:

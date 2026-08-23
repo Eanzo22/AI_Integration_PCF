@@ -8,6 +8,7 @@
 
 # output directory
 /out
+/outputs
 
 # msbuild output directories
 /bin
@@ -21,3 +22,5 @@
 
 # macos
 .DS_Store
+
+/AI_Integration_API_test

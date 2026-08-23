@@ -220,6 +220,35 @@
   padding: 10px;
 }
 
+.ai-advisor__notice {
+  background: #fff9e5;
+  border: 1px solid #e0b232;
+  border-radius: 4px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.ai-advisor__notice--warning {
+  color: #5f4300;
+}
+
+.ai-advisor__notice-title {
+  align-items: center;
+  color: #8a6100;
+  display: flex;
+  font-size: 13px;
+  font-weight: 700;
+  gap: 8px;
+}
+
+.ai-advisor__notice--warning .ai-advisor__section-icon {
+  background: #fff4ce;
+  border-color: #e0b232;
+  color: #8a6100;
+}
+
 .ai-advisor__section-title {
   align-items: center;
   color: #0f6cbd;

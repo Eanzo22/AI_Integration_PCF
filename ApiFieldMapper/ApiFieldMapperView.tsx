@@ -40,6 +40,7 @@ export interface AdvisorSuggestionViewModel {
   correlationId?: string;
   customerCallSuggestionInstructionsByAI?: string;
   decisionByAI?: OptionSetItemViewModel;
+  department1?: LookupItemViewModel;
   feedbackByAI?: string;
   generatedOn?: string;
   invalidReason?: OptionSetItemViewModel;
@@ -60,6 +61,7 @@ interface AdvisorSections {
   confidenceLabel: string;
   confidenceScore: string;
   customerCallSuggestionInstructions: string;
+  department1: string;
   invalidReason: string;
   policyReference: string;
   // processingNotes: string;
@@ -77,6 +79,7 @@ export interface ApiFieldMapperViewProps {
   actionStatusLabel?: string;
   actionDisabledReason?: string;
   allowedBpfStagesTooltip?: string;
+  canGenerate: boolean;
   canReview: boolean;
   canTakeActions: boolean;
   displaySuggestion?: AdvisorSuggestionViewModel;
@@ -84,7 +87,10 @@ export interface ApiFieldMapperViewProps {
   errorMessage?: string;
   isDevelopment: boolean;
   isDisabled: boolean;
+  applyInvalidReasonRequirement: boolean;
+  isReviewDisabled: boolean;
   isLoading: boolean;
+  moreInfoMessage?: string;
   pendingResultJson?: string;
   pendingResultText?: string;
   pendingSuggestion?: AdvisorSuggestionViewModel;
@@ -144,13 +150,24 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
     const displaySuggestion = this.getDisplaySuggestion();
     const advisor = this.getAdvisorSections();
     const badges = this.getBadgeStates();
+    const moreInfoMessage = this.props.moreInfoMessage?.trim();
     const shouldShowStatus = this.props.isLoading || this.state.isStatusVisible;
-    const actionDisabledReason = this.props.canTakeActions ? undefined : this.props.actionDisabledReason;
+    const moreInfoActionDisabledReason = moreInfoMessage
+      ? "More information is needed before this response can be applied."
+      : undefined;
+    const actionDisabledReason = moreInfoActionDisabledReason ?? (this.props.canTakeActions ? undefined : this.props.actionDisabledReason);
+    const generateDisabledReason = this.props.canGenerate ? undefined : this.props.actionDisabledReason;
     const isActionBlocked = Boolean(actionDisabledReason);
+    const isGenerateBlocked = Boolean(generateDisabledReason);
     const isAcceptBlockedByAssessDispute = this.isAssessDisputeSuggestion(this.props.pendingSuggestion);
-    const acceptDisabledReason = isAcceptBlockedByAssessDispute
-      ? "You need to fill the Customer Satisfaction"
-      : actionDisabledReason;
+    const isAcceptBlockedByMissingInvalidReason = this.props.applyInvalidReasonRequirement
+      && this.isMissingRequiredInvalidReason(this.props.pendingSuggestion);
+    const isAcceptBlocked = isAcceptBlockedByAssessDispute || isAcceptBlockedByMissingInvalidReason;
+    const acceptDisabledReason = this.formatAcceptDisabledReason(
+      isAcceptBlockedByAssessDispute,
+      isAcceptBlockedByMissingInvalidReason,
+      actionDisabledReason
+    );
 
     return (
       <div className={`ai-advisor${this.props.isDisabled ? " ai-advisor--disabled" : ""}`} aria-disabled={this.props.isDisabled}>
@@ -158,7 +175,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
           <div className="ai-advisor__title">
             <span className="ai-advisor__title-icon">AI</span>
             <span className="ai-advisor__heading">
-              AI Advisor Head
+              AI Advisor
             </span>
           </div>
           <div className="ai-advisor__status">
@@ -180,109 +197,127 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
 
         {this.props.errorMessage ? <div className="ai-advisor__error">{this.props.errorMessage}</div> : null}
 
-        <section className="ai-advisor__section">
-          <div className="ai-advisor__section-title">
-            <span className="ai-advisor__section-icon">R</span>
-            AI Recommendation
-          </div>
-          <div className="ai-advisor__rows">
-            <div className="ai-advisor__recommendation-grid">
-              <div className="ai-advisor__row ai-advisor__row--compact">
-                <span className="ai-advisor__label">Decision by AI:</span>
-                <span className="ai-advisor__value">{advisor.suggestedDecision}</span>
-              </div>
-              <div className="ai-advisor__row ai-advisor__row--compact">
-                <span className="ai-advisor__label">Validation by AI:</span>
-                <span className="ai-advisor__value">{advisor.validationByAI}</span>
-              </div>
-              <div className="ai-advisor__row ai-advisor__row--compact">
-                <span className="ai-advisor__label">Closed In Favor Of:</span>
-                <span className="ai-advisor__value">{advisor.closedInFavorOf}</span>
-              </div>
-              <div className="ai-advisor__row ai-advisor__row--compact">
-                <span className="ai-advisor__label">Invalid Reason by AI:</span>
-                <span className="ai-advisor__value">{advisor.invalidReason}</span>
-              </div>
+        {moreInfoMessage ? (
+          <section className="ai-advisor__notice ai-advisor__notice--warning">
+            <div className="ai-advisor__notice-title">
+              <span className="ai-advisor__section-icon">i</span>
+              More information needed
             </div>
-            <div className="ai-advisor__row ai-advisor__row--full">
-              <span className="ai-advisor__label">Feedback by AI:</span>
-              <span className="ai-advisor__value">{advisor.suggestedComment}</span>
-            </div>
-            {advisor.routeToSPReasons ? (
-              <div className="ai-advisor__row ai-advisor__row--full">
-                <span className="ai-advisor__label">Route to SP Reasons:</span>
-                <span className="ai-advisor__value">{advisor.routeToSPReasons}</span>
+            <div className="ai-advisor__body">{moreInfoMessage}</div>
+          </section>
+        ) : (
+          <>
+            <section className="ai-advisor__section">
+              <div className="ai-advisor__section-title">
+                <span className="ai-advisor__section-icon">R</span>
+                AI Recommendation
               </div>
+              <div className="ai-advisor__rows">
+                <div className="ai-advisor__recommendation-grid">
+                  <div className="ai-advisor__row ai-advisor__row--compact">
+                    <span className="ai-advisor__label">Decision by AI:</span>
+                    <span className="ai-advisor__value">{advisor.suggestedDecision}</span>
+                  </div>
+                  <div className="ai-advisor__row ai-advisor__row--compact">
+                    <span className="ai-advisor__label">Validation by AI:</span>
+                    <span className="ai-advisor__value">{advisor.validationByAI}</span>
+                  </div>
+                  <div className="ai-advisor__row ai-advisor__row--compact">
+                    <span className="ai-advisor__label">Closed In Favor Of:</span>
+                    <span className="ai-advisor__value">{advisor.closedInFavorOf}</span>
+                  </div>
+                  <div className="ai-advisor__row ai-advisor__row--compact">
+                    <span className="ai-advisor__label">Invalid Reason by AI:</span>
+                    <span className="ai-advisor__value">{advisor.invalidReason}</span>
+                  </div>
+                  {advisor.department1 ? (
+                    <div className="ai-advisor__row ai-advisor__row--compact">
+                      <span className="ai-advisor__label">Department 1:</span>
+                      <span className="ai-advisor__value">{advisor.department1}</span>
+                    </div>
+                  ) : null}
+                </div>
+                {advisor.routeToSPReasons ? (
+                  <div className="ai-advisor__row ai-advisor__row--full">
+                    <span className="ai-advisor__label">Route to SP Reasons:</span>
+                    <span className="ai-advisor__value">{advisor.routeToSPReasons}</span>
+                  </div>
+                ) : null}
+                <div className="ai-advisor__row ai-advisor__row--full">
+                  <span className="ai-advisor__label">Feedback by AI:</span>
+                  <span className="ai-advisor__value">{advisor.suggestedComment}</span>
+                </div>
+              </div>
+            </section>
+
+            {advisor.customerCallSuggestionInstructions ? (
+              <section className="ai-advisor__section">
+                <div className="ai-advisor__section-title">
+                  <span className="ai-advisor__section-icon">Q</span>
+                  Customer Call Instructions
+                </div>
+                <div className="ai-advisor__body">{advisor.customerCallSuggestionInstructions}</div>
+              </section>
             ) : null}
-          </div>
-        </section>
 
-        {advisor.customerCallSuggestionInstructions ? (
-          <section className="ai-advisor__section">
-            <div className="ai-advisor__section-title">
-              <span className="ai-advisor__section-icon">Q</span>
-              Customer Call Instructions
-            </div>
-            <div className="ai-advisor__body">{advisor.customerCallSuggestionInstructions}</div>
-          </section>
-        ) : null}
+            {/* {advisor.processingNotes ? (
+              <section className="ai-advisor__section">
+                <div className="ai-advisor__section-title">
+                  <span className="ai-advisor__section-icon">V</span>
+                  Processing Notes
+                </div>
+                <div className="ai-advisor__body">{advisor.processingNotes}</div>
+              </section>
+            ) : null} */}
 
-        {/* {advisor.processingNotes ? (
-          <section className="ai-advisor__section">
-            <div className="ai-advisor__section-title">
-              <span className="ai-advisor__section-icon">V</span>
-              Processing Notes
-            </div>
-            <div className="ai-advisor__body">{advisor.processingNotes}</div>
-          </section>
-        ) : null} */}
+            <section className="ai-advisor__section">
+              <div className="ai-advisor__section-title">
+                <span className="ai-advisor__section-icon">L</span>
+                Legal Notes
+              </div>
+              {this.renderLegalNotes(displaySuggestion?.legalNotes)}
+            </section>
 
-        <section className="ai-advisor__section">
-          <div className="ai-advisor__section-title">
-            <span className="ai-advisor__section-icon">L</span>
-            Legal Notes
-          </div>
-          {this.renderLegalNotes(displaySuggestion?.legalNotes)}
-        </section>
+            {advisor.policyReference ? (
+              <section className="ai-advisor__section">
+                <div className="ai-advisor__section-title">
+                  <span className="ai-advisor__section-icon">P</span>
+                  Policy Reference
+                </div>
+                <div className="ai-advisor__body">{advisor.policyReference}</div>
+              </section>
+            ) : null}
 
-        {advisor.policyReference ? (
-          <section className="ai-advisor__section">
-            <div className="ai-advisor__section-title">
-              <span className="ai-advisor__section-icon">P</span>
-              Policy Reference
+            <div className="ai-advisor__footer">
+              <div className="ai-advisor__metric">
+                <div className="ai-advisor__metric-header">
+                  <span className="ai-advisor__metric-icon">%</span>
+                  Confidence
+                </div>
+                <div className="ai-advisor__body">
+                  {advisor.confidenceLabel}
+                  <br />
+                  {advisor.confidenceScore}
+                </div>
+              </div>
+              <div className="ai-advisor__metric">
+                <div className="ai-advisor__metric-header">
+                  <span className="ai-advisor__metric-icon">i</span>
+                  Advisory Note
+                </div>
+                <div className="ai-advisor__body">{advisor.advisoryNote}</div>
+              </div>
             </div>
-            <div className="ai-advisor__body">{advisor.policyReference}</div>
-          </section>
-        ) : null}
-
-        <div className="ai-advisor__footer">
-          <div className="ai-advisor__metric">
-            <div className="ai-advisor__metric-header">
-              <span className="ai-advisor__metric-icon">%</span>
-              Confidence
-            </div>
-            <div className="ai-advisor__body">
-              {advisor.confidenceLabel}
-              <br />
-              {advisor.confidenceScore}
-            </div>
-          </div>
-          <div className="ai-advisor__metric">
-            <div className="ai-advisor__metric-header">
-              <span className="ai-advisor__metric-icon">i</span>
-              Advisory Note
-            </div>
-            <div className="ai-advisor__body">{advisor.advisoryNote}</div>
-          </div>
-        </div>
+          </>
+        )}
 
         <div className="ai-advisor__actions">
           <div className="ai-advisor__button-row">
-            <span className="ai-advisor__button-shell" data-tooltip={actionDisabledReason}>
+            <span className="ai-advisor__button-shell" data-tooltip={generateDisabledReason}>
               <button
                 type="button"
                 className="ai-advisor__button ai-advisor__button--generate"
-                disabled={this.props.isDisabled || isActionBlocked || !this.props.endpointConfigured || this.props.isLoading}
+                disabled={this.props.isDisabled || isGenerateBlocked || !this.props.endpointConfigured || this.props.isLoading}
                 onClick={this.props.onGenerate}
               >
                 <FluentIconBox kind="generate" />
@@ -292,13 +327,14 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
             <span className="ai-advisor__button-shell" data-tooltip={acceptDisabledReason}>
               <button
                 type="button"
-                className={`ai-advisor__button ai-advisor__button--accept${isAcceptBlockedByAssessDispute ? " ai-advisor__button--dimmed" : ""}`}
+                className={`ai-advisor__button ai-advisor__button--accept${isAcceptBlocked ? " ai-advisor__button--dimmed" : ""}`}
                 disabled={
                   this.props.isDisabled
+                  || this.props.isReviewDisabled
                   || isActionBlocked
                   || !this.props.canReview
                   || this.props.isLoading
-                  || isAcceptBlockedByAssessDispute
+                  || isAcceptBlocked
                 }
                 onClick={this.props.onAccept}
               >
@@ -310,7 +346,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
               <button
                 type="button"
                 className="ai-advisor__button ai-advisor__button--reject"
-                disabled={this.props.isDisabled || isActionBlocked || !this.props.canReview || this.props.isLoading}
+                disabled={this.props.isDisabled || this.props.isReviewDisabled || isActionBlocked || !this.props.canReview || this.props.isLoading}
                 onClick={this.props.onReject}
               >
                 <FluentIconBox kind="reject" />
@@ -321,7 +357,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
               <button
                 type="button"
                 className="ai-advisor__button ai-advisor__button--modify"
-                disabled={this.props.isDisabled || isActionBlocked || !this.props.canReview || this.props.isLoading}
+                disabled={this.props.isDisabled || this.props.isReviewDisabled || isActionBlocked || !this.props.canReview || this.props.isLoading}
                 onClick={this.props.onModify}
               >
                 <FluentIconBox kind="modify" />
@@ -387,6 +423,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
       confidenceLabel: suggestion?.confidenceLabel ?? this.mapConfidenceLabel(confidence),
       confidenceScore: this.formatConfidence(confidence),
       customerCallSuggestionInstructions: suggestion?.customerCallSuggestionInstructionsByAI?.trim() ?? "",
+      department1: this.formatLookupItem(suggestion?.department1) ?? "",
       invalidReason: this.formatOptionSetItem(suggestion?.invalidReason) ?? "--",
       policyReference: suggestion?.policyReference ?? "",
       // processingNotes: this.formatProcessingNotes(suggestion),
@@ -429,11 +466,11 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
       }];
     }
 
-    if (this.props.canReview) {
+    if (this.props.moreInfoMessage?.trim()) {
       return [{
-        icon: "completed",
-        kind: "success",
-        label: "AI Completed"
+        icon: "warning",
+        kind: "warning",
+        label: "More Info Needed"
       }];
     }
 
@@ -441,6 +478,14 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
 
     if (actionStatus) {
       return [actionStatus];
+    }
+
+    if (this.props.canReview) {
+      return [{
+        icon: "completed",
+        kind: "success",
+        label: "AI Completed"
+      }];
     }
 
     return [{
@@ -568,6 +613,40 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
       || decisionText.includes("route to sp");
   }
 
+  private isMissingRequiredInvalidReason(suggestion: AdvisorSuggestionViewModel | undefined): boolean {
+    return Boolean(suggestion)
+      && this.isInvalidValidation(suggestion)
+      && !this.hasValidInvalidReason(suggestion);
+  }
+
+  private isInvalidValidation(suggestion: AdvisorSuggestionViewModel | undefined): boolean {
+    const validationLabel = suggestion?.validationByAI?.label?.toLowerCase();
+
+    if (validationLabel) {
+      return validationLabel.includes("invalid");
+    }
+
+    return suggestion?.validationByAI?.value !== undefined && suggestion.validationByAI.value !== 1;
+  }
+
+  private hasValidInvalidReason(suggestion: AdvisorSuggestionViewModel | undefined): boolean {
+    return suggestion?.invalidReason?.value !== undefined && suggestion.invalidReason.value > 0;
+  }
+
+  private formatAcceptDisabledReason(
+    isAssessDisputeBlocked: boolean,
+    isInvalidReasonBlocked: boolean,
+    actionDisabledReason: string | undefined
+  ): string | undefined {
+    const reasons = [
+      isAssessDisputeBlocked ? "You need to fill the Customer Satisfaction" : undefined,
+      isInvalidReasonBlocked ? "Invalid Reason is required when Validation by AI is Invalid." : undefined,
+      actionDisabledReason
+    ].filter((reason): reason is string => Boolean(reason));
+
+    return reasons.length > 0 ? reasons.join("\n") : undefined;
+  }
+
   private isAssessDisputeSuggestion(suggestion: AdvisorSuggestionViewModel | undefined): boolean {
     if (suggestion?.decisionByAI?.value === 3) {
       return true;
@@ -675,7 +754,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
 }
 
 type FluentIconKind = "accept" | "modify" | "generate" | "reject";
-type BadgeIconKind = FluentIconKind | "completed" | "disabled" | "error" | "ready";
+type BadgeIconKind = FluentIconKind | "completed" | "disabled" | "error" | "ready" | "warning";
 
 interface FluentIconBoxProps {
   kind: FluentIconKind;
@@ -693,6 +772,7 @@ const badgeIconPaths: Record<BadgeIconKind, string> = {
   completed: fluentIconPaths.accept,
   disabled: "M10 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16Zm-5.1 4.2a7 7 0 0 0 8.9 8.9L4.9 6.2Zm10.2 7.6a7 7 0 0 0-8.9-8.9l8.9 8.9Z",
   error: "M10 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16Zm-.5 4.5v4a.5.5 0 0 0 1 0v-4a.5.5 0 0 0-1 0Zm.5 7.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Z",
+  warning: "M10.87 2.75a1 1 0 0 0-1.74 0l-7 12A1 1 0 0 0 3 16.25h14a1 1 0 0 0 .87-1.5l-7-12ZM10.5 7a.5.5 0 0 0-1 0v4a.5.5 0 0 0 1 0V7Zm-.5 7a.75.75 0 1 0 0-1.5A.75.75 0 0 0 10 14Z",
   ready: "M10 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16Zm0 1a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm-.5 3.5a.5.5 0 0 1 1 0V10c0 .13-.05.26-.15.35l-2 2a.5.5 0 0 1-.7-.7L9.5 9.79V6.5Z"
 };
 
