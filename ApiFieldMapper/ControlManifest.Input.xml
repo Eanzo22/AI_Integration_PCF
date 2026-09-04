@@ -1,6 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <manifest>
-  <control namespace="AIIntegration" constructor="ApiFieldMapper" version="0.0.90" display-name-key="AIIntegration" description-key="AIIntegration PCF FOR TDRA" control-type="standard">
+  <!-- Reason: Department 1 validation now accepts all Dataverse-compatible GUIDs. Change: increment the control version so deployments detect the validation correction. -->
+  <control namespace="AIIntegration" constructor="ApiFieldMapper" version="0.0.94" display-name-key="AIIntegration" description-key="AIIntegration PCF FOR TDRA" control-type="standard">
     <!--external-service-usage node declares whether this 3rd party PCF control is using external service or not, if yes, this control will be considered as premium and please also add the external domain it is using.
     If it is not using any external service, please set the enabled="false" and DO NOT add any domain below. The "enabled" will be false by default.
     Example1:
@@ -82,6 +83,11 @@
     <property name="closedInFavorOf" display-name-key="Closed in Favor of by AI" description-key="Bound option set field populated with who the case should close in favor of when the AI decision is Assess Dispute." of-type="OptionSet" usage="bound" required="false" />
     <property name="routeToSPReasons" display-name-key="Route to Service Provider Reason" description-key="Bound lookup field populated with the AI route-to-service-provider reason returned in RouteToSPReasonsJson." of-type="Lookup.Simple" usage="bound" required="false" />
     <property name="department1" display-name-key="Department 1" description-key="Bound lookup field populated with the AI Department 1 value returned in Department1Json." of-type="Lookup.Simple" usage="bound" required="false" />
+    <!-- Reason: makers should find a requirement option beside the field it controls. Change: place the Route to Department requirement directly below the Department 1 bound lookup. -->
+    <property name="isDepartment1Required" display-name-key="Is Department 1 Required" description-key="Controls whether Accept is blocked for Route to Department decisions when the AI response does not contain a valid Department 1 lookup with a Dataverse GUID." of-type="Enum" usage="input" required="false" default-value="false">
+      <value name="No" display-name-key="No" description-key="Allow Route to Department recommendations to be accepted when Department 1 is empty or invalid.">false</value>
+      <value name="Yes" display-name-key="Yes" description-key="Require a valid Department 1 lookup before accepting a Route to Department recommendation.">true</value>
+    </property>
     <property name="assessDisputeComment" display-name-key="Assess Dispute Comment" description-key="Bound comment field populated only when the AI decision is Assess Dispute." of-type-group="textValues" usage="bound" required="false" />
     <property name="routeToServiceProviderComment" display-name-key="Route to Service Provider Comment" description-key="Bound comment field populated only when the AI decision is Route to Service Provider." of-type-group="textValues" usage="bound" required="false" />
     <property name="routeToDepartmentComment" display-name-key="Route to Department Comment" description-key="Bound comment field populated only when the AI decision is Route to Department." of-type-group="textValues" usage="bound" required="false" />

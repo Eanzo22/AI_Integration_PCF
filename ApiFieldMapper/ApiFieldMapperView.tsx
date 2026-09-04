@@ -88,6 +88,8 @@ export interface ApiFieldMapperViewProps {
   isDevelopment: boolean;
   isDisabled: boolean;
   applyInvalidReasonRequirement: boolean;
+  // Reason: the view must reflect the configured Department 1 requirement immediately. Change: expose the requirement flag to the Accept-button validation.
+  isDepartment1Required: boolean;
   isReviewDisabled: boolean;
   isLoading: boolean;
   moreInfoMessage?: string;
@@ -162,10 +164,16 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
     const isAcceptBlockedByAssessDispute = this.isAssessDisputeSuggestion(this.props.pendingSuggestion);
     const isAcceptBlockedByMissingInvalidReason = this.props.applyInvalidReasonRequirement
       && this.isMissingRequiredInvalidReason(this.props.pendingSuggestion);
-    const isAcceptBlocked = isAcceptBlockedByAssessDispute || isAcceptBlockedByMissingInvalidReason;
+    // Reason: Department 1 is relevant only when the recommendation routes the Case to a department. Change: block Accept only for Route to Department responses with no valid Department 1 GUID.
+    const isAcceptBlockedByMissingDepartment1 = this.props.isDepartment1Required
+      && this.isMissingRequiredDepartment1(this.props.pendingSuggestion);
+    const isAcceptBlocked = isAcceptBlockedByAssessDispute
+      || isAcceptBlockedByMissingInvalidReason
+      || isAcceptBlockedByMissingDepartment1;
     const acceptDisabledReason = this.formatAcceptDisabledReason(
       isAcceptBlockedByAssessDispute,
       isAcceptBlockedByMissingInvalidReason,
+      isAcceptBlockedByMissingDepartment1,
       actionDisabledReason
     );
 
@@ -633,14 +641,43 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
     return suggestion?.invalidReason?.value !== undefined && suggestion.invalidReason.value > 0;
   }
 
+  // Reason: other decisions do not use Department 1. Change: validate the Department 1 GUID only when the AI decision is Route to Department.
+  private isMissingRequiredDepartment1(suggestion: AdvisorSuggestionViewModel | undefined): boolean {
+    if (!suggestion || !this.isRouteToDepartmentSuggestion(suggestion)) {
+      return false;
+    }
+
+    const departmentId = suggestion.department1?.id?.replace(/[{}]/g, "").trim() ?? "";
+    // Reason: Dataverse GUIDs are SQL uniqueidentifier values and do not always contain RFC UUID version or variant bits. Change: validate only the Dataverse-compatible hexadecimal 8-4-4-4-12 shape used by the backend.
+    return !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(departmentId);
+  }
+
+  // Reason: the UI must identify Route to Department before applying its conditional requirement. Change: detect the decision by option value first and normalized label second.
+  private isRouteToDepartmentSuggestion(suggestion: AdvisorSuggestionViewModel): boolean {
+    if (suggestion.decisionByAI?.value === 2) {
+      return true;
+    }
+
+    const decisionText = [suggestion.decisionByAI?.label, suggestion.suggestedDecision]
+      .filter((value): value is string => Boolean(value))
+      .join(" ")
+      .replace(/_/g, " ")
+      .toLowerCase();
+
+    return decisionText.includes("route") && decisionText.includes("department");
+  }
+
   private formatAcceptDisabledReason(
     isAssessDisputeBlocked: boolean,
     isInvalidReasonBlocked: boolean,
+    isDepartment1Blocked: boolean,
     actionDisabledReason: string | undefined
   ): string | undefined {
     const reasons = [
       isAssessDisputeBlocked ? "You need to fill the Customer Satisfaction" : undefined,
       isInvalidReasonBlocked ? "Invalid Reason is required when Validation by AI is Invalid." : undefined,
+      // Reason: users need to know the decision-specific requirement blocking Accept. Change: identify Route to Department in the combined tooltip message.
+      isDepartment1Blocked ? "Department 1 is required for Route to Department and must contain a valid Dataverse record ID." : undefined,
       actionDisabledReason
     ].filter((reason): reason is string => Boolean(reason));
 

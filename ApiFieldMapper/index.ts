@@ -350,6 +350,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             endpointConfigured: Boolean(apiEndpoint || testingResponseJson),
             errorMessage: this.errorMessage,
             applyInvalidReasonRequirement: this.getApplyInvalidReasonRequirement(context),
+            // Reason: the React view needs the configured Department 1 requirement to disable Accept immediately. Change: pass the manifest flag into the view props.
+            isDepartment1Required: this.getIsDepartment1Required(context),
             isDevelopment: this.getIsDevelopment(context),
             isDisabled: this.isControlDisabled(),
             isReviewDisabled: this.isManuallyDisabled,
@@ -3348,6 +3350,17 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         return values.some((value) => this.parseBooleanInput(value));
     }
 
+    // Reason: makers can choose whether Department 1 is mandatory for accepting AI recommendations. Change: read the optional manifest flag with a safe false default.
+    private getIsDepartment1Required(context: ComponentFramework.Context<IInputs>): boolean {
+        const parameters = context.parameters as IInputs & Record<string, { raw?: unknown } | undefined>;
+        const values = [
+            parameters.isDepartment1Required?.raw,
+            parameters.isdepartment1required?.raw
+        ];
+
+        return values.some((value) => this.parseBooleanInput(value));
+    }
+
     private getBpfEntityName(context: ComponentFramework.Context<IInputs>): string {
         return context.parameters.bpfEntityName.raw?.trim() ?? "ldv_bpf_c7bfac2f19d840fdafbbe0bcafa3b206";
     }
@@ -5293,6 +5306,16 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         return suggestion.invalidReason?.value !== undefined && suggestion.invalidReason.value > 0;
     }
 
+    // Reason: Department 1 is used only by Route to Department decisions. Change: require its valid Dataverse GUID only for that decision before Accept starts.
+    private isMissingRequiredDepartment1(suggestion: AdvisorSuggestionViewModel): boolean {
+        if (!this.isRouteToDepartmentDecision(suggestion)) {
+            return false;
+        }
+
+        const departmentId = this.cleanGuid(suggestion.department1?.id ?? "");
+        return !departmentId || !this.isGuid(departmentId);
+    }
+
     private getAcceptBlockedReasons(
         context: ComponentFramework.Context<IInputs>,
         suggestion: AdvisorSuggestionViewModel
@@ -5301,6 +5324,10 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             this.isAssessCaseDecision(suggestion) ? "You need to fill the Customer Satisfaction." : undefined,
             this.getApplyInvalidReasonRequirement(context) && this.isMissingRequiredInvalidReason(suggestion)
                 ? "Invalid Reason is required when Validation by AI is Invalid."
+                : undefined,
+            // Reason: Accept must enforce the Route to Department lookup requirement even if UI state is stale. Change: apply the action guard through the decision-aware validator.
+            this.getIsDepartment1Required(context) && this.isMissingRequiredDepartment1(suggestion)
+                ? "Department 1 is required for Route to Department and must contain a valid Dataverse record ID."
                 : undefined
         ].filter((reason): reason is string => Boolean(reason));
     }
