@@ -129,6 +129,7 @@ interface ContextWithPage {
 
 export class ApiFieldMapper implements ComponentFramework.StandardControl<IInputs, IOutputs> {
     private readonly defaultApiEndpoint = "";
+    private readonly defaultAzureAgentActionPath = "/api/data/v9.1/ldv_CallAzureAgentAIAction";
     private readonly caseEntityName = "incident";
     private readonly caseEntitySetName = "incidents";
     private readonly legalNoteCategoryEntityName = "ldv_legalnotecategory";
@@ -2712,6 +2713,16 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             return;
         }
 
+        const lookupId = this.cleanGuid(lookupValue.id);
+
+        if (!this.isGuid(lookupId)) {
+            this.log("lookup payload skipped: lookup id is not a Dataverse GUID", {
+                logicalName,
+                lookupValue
+            });
+            return;
+        }
+
         const entityType = lookupValue.entityType || this.getLookupParameterTargetEntityType(parameter);
 
         if (!entityType) {
@@ -2723,7 +2734,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         }
 
         const entitySetName = await this.getLookupEntitySetName(context, entityType);
-        payload[`${logicalName}@odata.bind`] = `/${entitySetName}(${this.cleanGuid(lookupValue.id)})`;
+        payload[`${logicalName}@odata.bind`] = `/${entitySetName}(${lookupId})`;
     }
 
     private async addBoundLookupValueOrNull(
@@ -3060,7 +3071,55 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
 
     private getApiEndpoint(context: ComponentFramework.Context<IInputs>): string {
         const configuredEndpoint = context.parameters.apiEndpoint.raw?.trim();
-        return configuredEndpoint && configuredEndpoint.length > 0 ? configuredEndpoint : this.defaultApiEndpoint;
+        const apiEndpoint = configuredEndpoint && configuredEndpoint.length > 0
+            ? configuredEndpoint
+            : this.defaultApiEndpoint;
+
+        if (!this.getIsBaseUrlDynamicallyHandled(context)) {
+            return apiEndpoint;
+        }
+
+        return this.buildDynamicApiEndpoint(context, apiEndpoint);
+    }
+
+    private buildDynamicApiEndpoint(context: ComponentFramework.Context<IInputs>, apiEndpoint: string): string {
+        const clientUrl = this.getClientUrl(context);
+        const relativePath = this.getApiEndpointRelativePath(apiEndpoint);
+
+        if (!clientUrl) {
+            this.log("dynamic api endpoint skipped: client url unavailable", {
+                apiEndpoint,
+                relativePath
+            });
+            return apiEndpoint;
+        }
+
+        return `${clientUrl}${relativePath}`;
+    }
+
+    private getApiEndpointRelativePath(apiEndpoint: string): string {
+        const trimmedEndpoint = apiEndpoint.trim();
+
+        if (!trimmedEndpoint) {
+            return this.defaultAzureAgentActionPath;
+        }
+
+        const normalizedEndpoint = trimmedEndpoint.toLowerCase();
+        const apiDataIndex = normalizedEndpoint.indexOf("/api/data/");
+
+        if (apiDataIndex >= 0) {
+            return trimmedEndpoint.slice(apiDataIndex);
+        }
+
+        if (normalizedEndpoint.startsWith("api/data/")) {
+            return `/${trimmedEndpoint}`;
+        }
+
+        if (trimmedEndpoint.startsWith("/")) {
+            return trimmedEndpoint;
+        }
+
+        return this.defaultAzureAgentActionPath;
     }
 
     private getTestingResponseJson(context: ComponentFramework.Context<IInputs>): string {
@@ -3263,6 +3322,15 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         return [
             parameters.allowUnsupportedFormRefresh?.raw,
             parameters.allowunsupportedformrefresh?.raw
+        ].some((value) => this.parseBooleanInput(value));
+    }
+
+    private getIsBaseUrlDynamicallyHandled(context: ComponentFramework.Context<IInputs>): boolean {
+        const parameters = context.parameters as IInputs & Record<string, { raw?: unknown } | undefined>;
+
+        return [
+            parameters.isBaseUrlDynamicallyHandled?.raw,
+            parameters.isbaseurldynamicallyhandled?.raw
         ].some((value) => this.parseBooleanInput(value));
     }
 
@@ -3948,6 +4016,15 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         const id = this.cleanGuid(lookupItem?.id ?? "");
 
         if (!id) {
+            return undefined;
+        }
+
+        if (!this.isGuid(id)) {
+            this.log("AI lookup output skipped: lookup id is not a Dataverse GUID", {
+                id,
+                label,
+                lookupItem
+            });
             return undefined;
         }
 
@@ -5414,6 +5491,10 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
 
     private cleanGuid(value: string): string {
         return value.replace(/[{}]/g, "");
+    }
+
+    private isGuid(value: string): boolean {
+        return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
     }
 
     private isRecord(value: unknown): value is Record<string, unknown> {

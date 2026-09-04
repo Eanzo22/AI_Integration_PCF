@@ -1,6 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <manifest>
-  <control namespace="AIIntegration" constructor="ApiFieldMapper" version="0.0.89" display-name-key="AIIntegration" description-key="AIIntegration PCF FOR TDRA" control-type="standard">
+  <control namespace="AIIntegration" constructor="ApiFieldMapper" version="0.0.90" display-name-key="AIIntegration" description-key="AIIntegration PCF FOR TDRA" control-type="standard">
     <!--external-service-usage node declares whether this 3rd party PCF control is using external service or not, if yes, this control will be considered as premium and please also add the external domain it is using.
     If it is not using any external service, please set the enabled="false" and DO NOT add any domain below. The "enabled" will be false by default.
     Example1:
@@ -26,6 +26,10 @@
     <property name="providerName" display-name-key="Service Provider" description-key="Service provider option set used in the generated AI prompt. The option label is sent instead of the numeric value." of-type="OptionSet" usage="input" required="false" />
     <property name="providerResponse" display-name-key="Service Provider Response" description-key="Service provider response text used to build the generated AI prompt when Prompt Override is empty." of-type-group="textValues" usage="input" required="false" />
     <property name="apiEndpoint" display-name-key="API Endpoint" description-key="URL of the Dataverse custom API or external endpoint called to generate the AI recommendation. Required unless Testing Response JSON is populated." of-type="SingleLine.URL" usage="input" required="false" />
+    <property name="isBaseUrlDynamicallyHandled" display-name-key="Is Base URL Dynamically Handled" description-key="When Yes, the PCF uses the current Dataverse client URL as the endpoint base URL and keeps only the configured /api/data/... path." of-type="Enum" usage="input" required="false" default-value="false">
+      <value name="No" display-name-key="No" description-key="Use the configured API Endpoint exactly as entered.">false</value>
+      <value name="Yes" display-name-key="Yes" description-key="Replace the configured endpoint base URL with the current user.s Dataverse client URL.">true</value>
+    </property>
     <property name="testingResponseJson" display-name-key="Testing Response JSON" description-key="Optional raw JSON response used for testing the PCF parser and UI without calling the API endpoint. When populated, Generate uses this value as the returned response." of-type-group="textValues" usage="input" required="false" />
     <property name="requestMethod" display-name-key="Request Method" description-key="HTTP method used for the AI endpoint call. Supported values are GET, POST, PUT, and PATCH. Defaults to POST." of-type="SingleLine.Text" usage="input" required="false" />
     <property name="requestTemplate" display-name-key="Request Template" description-key="Optional JSON body template for the AI endpoint. Template tokens such as CaseId and inputText are replaced before sending." of-type="Multiple" usage="input" required="false" />
