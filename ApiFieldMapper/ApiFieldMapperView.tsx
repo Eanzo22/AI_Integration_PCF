@@ -85,6 +85,8 @@ export interface ApiFieldMapperViewProps {
   displaySuggestion?: AdvisorSuggestionViewModel;
   endpointConfigured: boolean;
   errorMessage?: string;
+  // Reason: Accept can be disabled independently for a configured PCF instance. Change: expose the new UI-only behavior flag to the view.
+  disableAccept: boolean;
   isDevelopment: boolean;
   isDisabled: boolean;
   applyInvalidReasonRequirement: boolean;
@@ -167,13 +169,17 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
     // Reason: Department 1 is relevant only when the recommendation routes the Case to a department. Change: block Accept only for Route to Department responses with no valid Department 1 GUID.
     const isAcceptBlockedByMissingDepartment1 = this.props.isDepartment1Required
       && this.isMissingRequiredDepartment1(this.props.pendingSuggestion);
+    // Reason: makers may intentionally disable only the Accept action. Change: include the configuration flag in the Accept button's blocked state.
+    const isAcceptBlockedByConfiguration = this.props.disableAccept;
     const isAcceptBlocked = isAcceptBlockedByAssessDispute
       || isAcceptBlockedByMissingInvalidReason
-      || isAcceptBlockedByMissingDepartment1;
+      || isAcceptBlockedByMissingDepartment1
+      || isAcceptBlockedByConfiguration;
     const acceptDisabledReason = this.formatAcceptDisabledReason(
       isAcceptBlockedByAssessDispute,
       isAcceptBlockedByMissingInvalidReason,
       isAcceptBlockedByMissingDepartment1,
+      isAcceptBlockedByConfiguration,
       actionDisabledReason
     );
 
@@ -671,6 +677,7 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
     isAssessDisputeBlocked: boolean,
     isInvalidReasonBlocked: boolean,
     isDepartment1Blocked: boolean,
+    isConfigurationBlocked: boolean,
     actionDisabledReason: string | undefined
   ): string | undefined {
     const reasons = [
@@ -678,6 +685,8 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
       isInvalidReasonBlocked ? "Invalid Reason is required when Validation by AI is Invalid." : undefined,
       // Reason: users need to know the decision-specific requirement blocking Accept. Change: identify Route to Department in the combined tooltip message.
       isDepartment1Blocked ? "Department 1 is required for Route to Department and must contain a valid Dataverse record ID." : undefined,
+      // Reason: a deliberately disabled Accept button should explain its configuration state. Change: append a clear message to the existing combined tooltip.
+      isConfigurationBlocked ? "Accept is disabled by the control configuration." : undefined,
       actionDisabledReason
     ].filter((reason): reason is string => Boolean(reason));
 

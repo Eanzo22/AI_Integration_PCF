@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <manifest>
-  <!-- Reason: Department 1 validation now accepts all Dataverse-compatible GUIDs. Change: increment the control version so deployments detect the validation correction. -->
-  <control namespace="AIIntegration" constructor="ApiFieldMapper" version="0.0.94" display-name-key="AIIntegration" description-key="AIIntegration PCF FOR TDRA" control-type="standard">
+  <!-- Reason: makers can now disable the Accept action independently. Change: increment the control version so deployments detect the new configuration input. -->
+  <control namespace="AIIntegration" constructor="ApiFieldMapper" version="0.0.95" display-name-key="AIIntegration" description-key="AIIntegration PCF FOR TDRA" control-type="standard">
     <!--external-service-usage node declares whether this 3rd party PCF control is using external service or not, if yes, this control will be considered as premium and please also add the external domain it is using.
     If it is not using any external service, please set the enabled="false" and DO NOT add any domain below. The "enabled" will be false by default.
     Example1:
@@ -40,6 +40,11 @@
     <property name="isDisabled" display-name-key="Is Disabled" description-key="Disables review actions in the AI Advisor while keeping the Generate button available." of-type="Enum" usage="input" required="false" default-value="false">
       <value name="No" display-name-key="No" description-key="Keep AI Advisor review actions enabled.">false</value>
       <value name="Yes" display-name-key="Yes" description-key="Disable review actions but allow Generate.">true</value>
+    </property>
+    <!-- Reason: some PCF instances must prevent acceptance while retaining the other review actions. Change: add an independent Yes/No input that disables only the Accept button. -->
+    <property name="disableAccept" display-name-key="Disable Accept" description-key="Controls whether the Accept button is disabled while Generate, Modify, and Reject retain their existing availability rules." of-type="Enum" usage="input" required="false" default-value="false">
+      <value name="No" display-name-key="No" description-key="Allow Accept when all other recommendation requirements are satisfied.">false</value>
+      <value name="Yes" display-name-key="Yes" description-key="Disable the Accept button for this PCF instance.">true</value>
     </property>
     <property name="isdevleopment" display-name-key="Is Development Mode" description-key="Controls whether development-only UI sections and console logs are shown." of-type="Enum" usage="input" required="false" default-value="false">
       <value name="Production" display-name-key="Production" description-key="Hides raw returned JSON, option-set numeric values, and debug console logs.">false</value>

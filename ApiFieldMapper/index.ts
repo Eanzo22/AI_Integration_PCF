@@ -349,6 +349,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             displaySuggestion: this.persistedSuggestion,
             endpointConfigured: Boolean(apiEndpoint || testingResponseJson),
             errorMessage: this.errorMessage,
+            // Reason: the view must disable Accept independently when configured by the maker. Change: pass the new manifest flag into the React props.
+            disableAccept: this.getDisableAccept(context),
             applyInvalidReasonRequirement: this.getApplyInvalidReasonRequirement(context),
             // Reason: the React view needs the configured Department 1 requirement to disable Accept immediately. Change: pass the manifest flag into the view props.
             isDepartment1Required: this.getIsDepartment1Required(context),
@@ -3346,6 +3348,17 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         if (values.every((value) => value === undefined || value === null || value === "")) {
             return true;
         }
+
+        return values.some((value) => this.parseBooleanInput(value));
+    }
+
+    // Reason: each PCF instance may independently disable only the Accept action. Change: read the optional Yes/No manifest input with a false default.
+    private getDisableAccept(context: ComponentFramework.Context<IInputs>): boolean {
+        const parameters = context.parameters as IInputs & Record<string, { raw?: unknown } | undefined>;
+        const values = [
+            parameters.disableAccept?.raw,
+            parameters.disableaccept?.raw
+        ];
 
         return values.some((value) => this.parseBooleanInput(value));
     }

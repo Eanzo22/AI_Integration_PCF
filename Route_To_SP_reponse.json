@@ -1,0 +1,15 @@
+{
+  "RouteToSPReasonsJson": "{\"Id\":\"cf427085-4543-ef11-8180-00155d3237e8\",\"Name\":\"Need More Investigation\"}",
+  "InvalidReason": "",
+  "InvalidReasonValue": null,
+  "LegalNotesJson": "[]",
+  "Validation": "Valid",
+  "ValidationValue": 1,
+  "DecisionValue": 1,
+  "CloseInFavorOfValue": 0,
+  "OutputResult": "{\"Decision\":\"Route to Service Provider\",\"Validation\":\"Valid\",\"CloseInFavorOf\":\"\",\"InvalidReason\":\"\",\"RouteToSPReasons\":{\"Id\":\"cf427085-4543-ef11-8180-00155d3237e8\",\"Name\":\"Need More Investigation\"},\"Reason\":\"The Service Provider must investigate the complaint further and provide a complete response before the case can be assessed.\",\"MatchedCases\":[],\"LegalNotes\":[]}",
+  "CloseInFavorOf": "N/A",
+  "Decision": "Route to Service Provider",
+  "Reason": "The Service Provider must investigate the complaint further and provide a complete response before the case can be assessed.",
+  "MatchedCasesJson": "[]"
+}
