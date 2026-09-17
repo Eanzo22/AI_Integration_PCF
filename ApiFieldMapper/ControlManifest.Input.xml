@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <manifest>
-  <!-- Reason: makers can now disable the Accept action independently. Change: increment the control version so deployments detect the new configuration input. -->
-  <control namespace="AIIntegration" constructor="ApiFieldMapper" version="0.0.95" display-name-key="AIIntegration" description-key="AIIntegration PCF FOR TDRA" control-type="standard">
+  <!-- Reason: AI requests may require up to 15 minutes to complete. Change: increment the control version so deployments detect the extended request timeout. -->
+  <control namespace="AIIntegration" constructor="ApiFieldMapper" version="0.0.97" display-name-key="AIIntegration" description-key="AIIntegration PCF FOR TDRA" control-type="standard">
     <!--external-service-usage node declares whether this 3rd party PCF control is using external service or not, if yes, this control will be considered as premium and please also add the external domain it is using.
     If it is not using any external service, please set the enabled="false" and DO NOT add any domain below. The "enabled" will be false by default.
     Example1:

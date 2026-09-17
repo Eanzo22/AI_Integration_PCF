@@ -156,7 +156,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     private readonly legalNoteNameField = "ldv_name";
     private readonly legalNoteRelatedCaseLookup = "ldv_RelatedCase";
     private readonly legalNoteRelatedCaseRelationship = "ldv_incident_ldv_legalnotescase_RelatedCase";
-    private readonly requestTimeoutMs = 120000;
+    // Reason: long-running AI requests can exceed the previous two-minute limit. Change: allow 900 seconds before aborting the endpoint request.
+    private readonly requestTimeoutMs = 900000;
     private readonly decisionAssessDisputeValue = 3;
     private readonly decisionEscalateToLeadValue = 6;
     private readonly decisionRouteToDepartmentValue = 2;
