@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <manifest>
-  <!-- Reason: AI requests may require up to 15 minutes to complete. Change: increment the control version so deployments detect the extended request timeout. -->
-  <control namespace="AIIntegration" constructor="ApiFieldMapper" version="0.0.97" display-name-key="AIIntegration" description-key="AIIntegration PCF FOR TDRA" control-type="standard">
+  <!-- Reason: review actions now validate the AI decision. Change: increment the version for the new configurable Reject requirement. -->
+  <control namespace="AIIntegration" constructor="ApiFieldMapper" version="0.0.99" display-name-key="AIIntegration" description-key="AIIntegration PCF FOR TDRA" control-type="standard">
     <!--external-service-usage node declares whether this 3rd party PCF control is using external service or not, if yes, this control will be considered as premium and please also add the external domain it is using.
     If it is not using any external service, please set the enabled="false" and DO NOT add any domain below. The "enabled" will be false by default.
     Example1:
@@ -82,6 +82,11 @@
     <property name="triggerOnValueChange" display-name-key="Trigger on Value Change" description-key="Automatically regenerate when the bound input value changes." of-type="TwoOptions" usage="input" required="false" />
     -->
     <property name="decisionByAI" display-name-key="Decision by AI" description-key="Bound option set field populated with the AI decision value after Accept or Modify." of-type="OptionSet" usage="bound" required="false" />
+    <!-- Reason: makers may still need to reject responses with unusable decisions. Change: place the optional Reject restriction directly below the decision field it validates. -->
+    <property name="disableRejectWhenDecisionInvalid" display-name-key="Disable Reject When Decision Is Invalid" description-key="When Yes, also disables Reject when Decision by AI is missing or not a valid numeric option. Accept and Modify always require a valid decision. Other action restrictions still apply." of-type="Enum" usage="input" required="false" default-value="false">
+      <value name="No" display-name-key="No" description-key="Allow Reject for missing or invalid AI decisions, subject to existing action restrictions.">false</value>
+      <value name="Yes" display-name-key="Yes" description-key="Disable Reject when the returned AI decision is missing or not a valid numeric option.">true</value>
+    </property>
     <property name="customerCallSuggestionInstructionsByAI" display-name-key="Customer Call Suggestion Instructions by AI" description-key="Bound multiline field populated with AI customer call instructions when returned by the endpoint." of-type="Multiple" usage="bound" required="false" />
     <property name="validationByAI" display-name-key="Validation by AI" description-key="Bound option set field populated with the AI validation value only when the AI decision is Assess Dispute." of-type="OptionSet" usage="bound" required="false" />
     <property name="invalidReason" display-name-key="Invalid Reason by AI" description-key="Bound option set field populated with the AI invalid reason only when validation is Invalid." of-type="OptionSet" usage="bound" required="false" />

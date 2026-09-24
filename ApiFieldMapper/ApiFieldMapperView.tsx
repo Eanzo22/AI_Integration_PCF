@@ -78,6 +78,9 @@ export interface ApiFieldMapperViewProps {
   acceptedResultText?: string;
   actionStatusLabel?: string;
   actionDisabledReason?: string;
+  // Reason: decision requirements must use the same validation as the action handlers. Change: accept separate reasons for mandatory review validation and the optional Reject restriction.
+  decisionDisabledReason?: string;
+  rejectDecisionDisabledReason?: string;
   allowedBpfStagesTooltip?: string;
   canGenerate: boolean;
   canReview: boolean;
@@ -163,6 +166,9 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
     const generateDisabledReason = this.props.canGenerate ? undefined : this.props.actionDisabledReason;
     const isActionBlocked = Boolean(actionDisabledReason);
     const isGenerateBlocked = Boolean(generateDisabledReason);
+    // Reason: invalid decisions always block Accept and Modify, but Reject is configurable. Change: combine each decision reason with existing tooltips without affecting Generate.
+    const decisionActionDisabledReason = [actionDisabledReason, this.props.decisionDisabledReason].filter(Boolean).join("\n") || undefined;
+    const rejectDisabledReason = [actionDisabledReason, this.props.rejectDecisionDisabledReason].filter(Boolean).join("\n") || undefined;
     const isAcceptBlockedByAssessDispute = this.isAssessDisputeSuggestion(this.props.pendingSuggestion);
     const isAcceptBlockedByMissingInvalidReason = this.props.applyInvalidReasonRequirement
       && this.isMissingRequiredInvalidReason(this.props.pendingSuggestion);
@@ -174,13 +180,14 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
     const isAcceptBlocked = isAcceptBlockedByAssessDispute
       || isAcceptBlockedByMissingInvalidReason
       || isAcceptBlockedByMissingDepartment1
-      || isAcceptBlockedByConfiguration;
+      || isAcceptBlockedByConfiguration
+      || Boolean(this.props.decisionDisabledReason);
     const acceptDisabledReason = this.formatAcceptDisabledReason(
       isAcceptBlockedByAssessDispute,
       isAcceptBlockedByMissingInvalidReason,
       isAcceptBlockedByMissingDepartment1,
       isAcceptBlockedByConfiguration,
-      actionDisabledReason
+      decisionActionDisabledReason
     );
 
     return (
@@ -356,22 +363,24 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
                 <span>Accept</span>
               </button>
             </span>
-            <span className="ai-advisor__button-shell" data-tooltip={actionDisabledReason}>
+            {/* Reason: Reject's decision restriction is optional. Change: use its independently evaluated tooltip and disabled state. */}
+            <span className="ai-advisor__button-shell" data-tooltip={rejectDisabledReason}>
               <button
                 type="button"
                 className="ai-advisor__button ai-advisor__button--reject"
-                disabled={this.props.isDisabled || this.props.isReviewDisabled || isActionBlocked || !this.props.canReview || this.props.isLoading}
+                disabled={this.props.isDisabled || this.props.isReviewDisabled || Boolean(rejectDisabledReason) || !this.props.canReview || this.props.isLoading}
                 onClick={this.props.onReject}
               >
                 <FluentIconBox kind="reject" />
                 <span>Reject</span>
               </button>
             </span>
-            <span className="ai-advisor__button-shell" data-tooltip={actionDisabledReason}>
+            {/* Reason: Modify must not apply an invalid decision to CRM fields. Change: include the decision validation reason in its tooltip and disabled state. */}
+            <span className="ai-advisor__button-shell" data-tooltip={decisionActionDisabledReason}>
               <button
                 type="button"
                 className="ai-advisor__button ai-advisor__button--modify"
-                disabled={this.props.isDisabled || this.props.isReviewDisabled || isActionBlocked || !this.props.canReview || this.props.isLoading}
+                disabled={this.props.isDisabled || this.props.isReviewDisabled || Boolean(decisionActionDisabledReason) || !this.props.canReview || this.props.isLoading}
                 onClick={this.props.onModify}
               >
                 <FluentIconBox kind="modify" />

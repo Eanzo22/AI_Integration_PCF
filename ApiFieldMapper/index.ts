@@ -343,6 +343,9 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             acceptedResultText: this.suggestedComment ?? this.resultText,
             actionStatusLabel: this.aiReviewStatusLabel,
             actionDisabledReason: this.getActionDisabledReason(),
+            // Reason: UI and action handlers must agree on decision validity. Change: supply reasons from the same decision validator for mandatory and optional review restrictions.
+            decisionDisabledReason: this.getInvalidDecisionDisabledReason(context, "accept"),
+            rejectDecisionDisabledReason: this.getInvalidDecisionDisabledReason(context, "reject"),
             allowedBpfStagesTooltip: this.getAllowedBpfStagesTooltip(context),
             canGenerate: this.canGenerate(),
             canReview: this.hasPendingResult(),
@@ -1268,6 +1271,11 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             return;
         }
 
+        // Reason: stale UI events must not apply a response with an invalid decision. Change: enforce the shared decision guard before Accept changes any outputs.
+        if (!this.ensureReviewDecisionAllowed(context, "accept")) {
+            return;
+        }
+
         if (!this.pendingSuggestion) {
             this.log("accept ignored: no pending suggestion");
             return;
@@ -1345,6 +1353,11 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             return;
         }
 
+        // Reason: Modify writes the returned decision into bound fields. Change: reject invalid decisions before any fields or review status are changed.
+        if (!this.ensureReviewDecisionAllowed(context, "modify")) {
+            return;
+        }
+
         if (!this.pendingSuggestion) {
             this.log("modify ignored: no pending suggestion");
             return;
@@ -1391,6 +1404,11 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
 
         if (!await this.refreshBpfGate(context, true)) {
             this.renderState(context);
+            return;
+        }
+
+        // Reason: Reject must honor its optional invalid-decision restriction. Change: check the configured guard before clearing fields or saving Rejected status.
+        if (!this.ensureReviewDecisionAllowed(context, "reject")) {
             return;
         }
 
@@ -3848,6 +3866,40 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         return typeof lookupLogicalName === "string" && lookupLogicalName.trim()
             ? lookupLogicalName
             : undefined;
+    }
+
+    // Reason: missing and unknown decisions cannot safely populate the Case. Change: share numeric option validation between the view and review handlers, with an optional Reject exemption.
+    private getInvalidDecisionDisabledReason(
+        context: ComponentFramework.Context<IInputs>,
+        actionName: "accept" | "modify" | "reject"
+    ): string | undefined {
+        if (actionName === "reject" && !this.parseBooleanInput(context.parameters.disableRejectWhenDecisionInvalid?.raw)) {
+            return undefined;
+        }
+
+        const value = this.pendingSuggestion?.decisionByAI?.value;
+        const metadataValues = this.getBoundOptionSetAllowedValues(context.parameters.decisionByAI);
+        // Reason: on-premise PCF can omit option metadata. Change: fall back to the documented Case decision values only when metadata supplies no options.
+        const allowedValues = metadataValues.length > 0 ? metadataValues : [1, 2, 3, 4, 5, 6];
+        const isValid = typeof value === "number" && Number.isInteger(value) && allowedValues.includes(value);
+
+        return isValid ? undefined : "Decision by AI is missing or invalid. A valid decision option is required.";
+    }
+
+    // Reason: disabled buttons alone do not protect against stale callbacks. Change: stop invalid review actions before mutations and explain the same reason shown in the tooltip.
+    private ensureReviewDecisionAllowed(
+        context: ComponentFramework.Context<IInputs>,
+        actionName: "accept" | "modify" | "reject"
+    ): boolean {
+        const reason = this.getInvalidDecisionDisabledReason(context, actionName);
+        if (!reason) {
+            return true;
+        }
+
+        this.statusText = reason;
+        this.log("review action blocked: invalid AI decision", { actionName, reason, decisionValue: this.pendingSuggestion?.decisionByAI?.value });
+        this.renderState(context);
+        return false;
     }
 
     private async ensureActionAllowed(context: ComponentFramework.Context<IInputs>, actionName: string): Promise<boolean> {
