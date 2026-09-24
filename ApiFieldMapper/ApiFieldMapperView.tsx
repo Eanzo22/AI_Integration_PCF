@@ -1,5 +1,9 @@
 import * as React from "react";
 
+// Reason: the React view combines recommendation presentation, persisted status, and action gating.
+// Change: document its data contracts and rendering sections without changing any UI behavior.
+
+/** Display model for one returned legal-note hierarchy. */
 export interface LegalNoteViewModel {
   CategoryId?: string;
   Id?: string;
@@ -20,17 +24,20 @@ export interface LegalNoteViewModel {
   ldv_RelatedCase?: string;
 }
 
+/** Stable option-set representation used even when only a value or label was returned. */
 export interface OptionSetItemViewModel {
   label?: string;
   value?: number;
 }
 
+/** Normalized Dataverse lookup returned by the AI payload. */
 export interface LookupItemViewModel {
   entityType?: string;
   id?: string;
   name?: string;
 }
 
+/** Complete recommendation model shared by parsing, persistence, and the React view. */
 export interface AdvisorSuggestionViewModel {
   advisoryNote?: string;
   caseRequestId?: string;
@@ -56,6 +63,7 @@ export interface AdvisorSuggestionViewModel {
   validationByAI?: OptionSetItemViewModel;
 }
 
+/** Preformatted strings consumed by the recommendation sections. */
 interface AdvisorSections {
   advisoryNote: string;
   confidenceLabel: string;
@@ -73,6 +81,7 @@ interface AdvisorSections {
   closedInFavorOf: string;
 }
 
+/** State and callbacks supplied by the PCF controller for one render. */
 export interface ApiFieldMapperViewProps {
   acceptedDecision?: string;
   acceptedResultText?: string;
@@ -121,6 +130,7 @@ interface BadgeState {
 
 const statusVisibleMs = 8000;
 
+/** Pure presentation layer for recommendation details, statuses, requirements, and actions. */
 export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps, ApiFieldMapperViewState> {
   private statusTimer?: number;
 
@@ -149,6 +159,8 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
   public componentWillUnmount(): void {
     this.clearStatusTimer();
   }
+
+  // Main recommendation and action rendering -------------------------------
 
   public render(): React.ReactNode {
     const status = this.props.errorMessage ?? this.props.statusText ?? "Ready";
@@ -409,6 +421,8 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
     );
   }
 
+  // Temporary status-message visibility -----------------------------------
+
   private clearStatusTimer(): void {
     if (this.statusTimer !== undefined) {
       window.clearTimeout(this.statusTimer);
@@ -428,6 +442,9 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
     }, statusVisibleMs);
   }
 
+  // Recommendation formatting ---------------------------------------------
+
+  /** Chooses pending data first, then persisted data, and supplies user-friendly empty states. */
   private getAdvisorSections(): AdvisorSections {
     const suggestion = this.getDisplaySuggestion();
     const confidence = suggestion?.confidence;
@@ -461,6 +478,9 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
     };
   }
 
+  // Status badges ----------------------------------------------------------
+
+  /** Applies badge precedence: error, disabled, loading, more-info, saved action, completed, ready. */
   private getBadgeStates(): BadgeState[] {
     if (this.props.errorMessage) {
       return [{
@@ -562,6 +582,8 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
     return this.props.pendingSuggestion ?? this.props.displaySuggestion;
   }
 
+  // Development-aware field formatting ------------------------------------
+
   private formatOptionSetItem(item: OptionSetItemViewModel | undefined): string | undefined {
     if (!item) {
       return undefined;
@@ -614,6 +636,8 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
       suggestion.invalidReason ? `Invalid Reason: ${this.formatOptionSetItem(suggestion.invalidReason)}` : undefined
     ].filter(Boolean).join("\n");
   }
+
+  // Decision-specific visibility and Accept requirements ------------------
 
   private shouldShowRouteToSPReasons(suggestion: AdvisorSuggestionViewModel | undefined): boolean {
     if (!suggestion?.routeToSPReason && !suggestion?.routeToSPReasons?.trim()) {
@@ -728,6 +752,8 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
     return values.join(" | ");
   }
 
+  // Legal-note rendering ---------------------------------------------------
+
   private renderLegalNotes(legalNotes: LegalNoteViewModel[] | undefined): React.ReactNode {
     if (!legalNotes || legalNotes.length === 0) {
       const message = this.getDisplaySuggestion()
@@ -780,6 +806,8 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
     );
   }
 
+  // Confidence display -----------------------------------------------------
+
   private formatConfidence(value: number | undefined): string {
     if (value === undefined) {
       return "--";
@@ -807,6 +835,8 @@ export class ApiFieldMapperView extends React.Component<ApiFieldMapperViewProps,
     return "Low";
   }
 }
+
+// Icon primitives ----------------------------------------------------------
 
 type FluentIconKind = "accept" | "modify" | "generate" | "reject";
 type BadgeIconKind = FluentIconKind | "completed" | "disabled" | "error" | "ready" | "warning";

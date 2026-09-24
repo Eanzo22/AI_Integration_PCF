@@ -13,8 +13,13 @@ import {
 import * as React from "react";
 import * as ReactDOM from "react-dom";
 
+// Reason: the control contains request, parsing, persistence, and Dataverse integration concerns in one module.
+// Change: document the major contracts and workflow sections so maintainers can navigate the control without changing its behavior.
+
+/** HTTP methods supported by the configurable AI endpoint request. */
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH";
 
+/** Minimal model-driven app record context exposed by the PCF host. */
 interface ContextInfo {
     entityId?: string;
     entityTypeName?: string;
@@ -25,6 +30,7 @@ interface RequestIdentifiers {
     correlationId: string;
 }
 
+/** Optional response envelope supported in addition to the direct Dataverse custom-action payload. */
 interface StandardApiResponse {
     success?: boolean;
     statusCode?: number;
@@ -38,21 +44,25 @@ interface StandardApiResponse {
     };
 }
 
+/** Normalized AI recommendation retained while the user reviews it. */
 interface PendingSuggestion extends AdvisorSuggestionViewModel {
     generatedOnDate: Date;
     rawJson: string;
 }
 
+/** Result of saving accepted values and creating any eligible legal-note records. */
 interface SaveResult {
     associatedLegalNotes: number;
     saved: boolean;
 }
 
+/** Current BPF stage details used by the allowed-stage gate. */
 interface BpfStageResult {
     stageId?: string;
     stageName?: string;
 }
 
+/** Original comment values retained so Reject can restore fields changed by Modify. */
 interface CommentOutputSnapshot {
     assessDisputeComment?: string;
     escalateToLeadComment?: string;
@@ -83,11 +93,13 @@ interface AgentCommentOutputGate {
     token: number;
 }
 
+/** Ownership and record-state result read directly from Dataverse. */
 interface RecordAccessState {
     isInactive: boolean;
     isOwner: boolean;
 }
 
+/** Live fields used to decide whether a service-status transition needs one generation. */
 interface ServiceStatusAutoGenerationState {
     lastRouteCount?: number;
     lastServiceStatusId?: string;
@@ -127,7 +139,16 @@ interface ContextWithPage {
     };
 }
 
+/**
+ * PCF controller for generating, reviewing, persisting, and restoring AI case recommendations.
+ *
+ * Generated preview state is intentionally separate from applied CRM output state. Generate
+ * persists a review snapshot, Accept writes operational fields through Web API, Modify emits
+ * bound outputs for user editing, and Reject restores or clears those outputs while preserving
+ * the recommendation in the reserved review fields.
+ */
 export class ApiFieldMapper implements ComponentFramework.StandardControl<IInputs, IOutputs> {
+    // Dataverse schema names and fallback endpoint configuration used by requests and associations.
     private readonly defaultApiEndpoint = "";
     private readonly defaultAzureAgentActionPath = "/api/data/v9.1/ldv_CallAzureAgentAIAction";
     private readonly caseEntityName = "incident";
@@ -204,6 +225,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     };
     private readonly serviceProviderOptionLabelLanguageCode = 1033;
     private readonly serviceProviderGlobalOptionSetName = "ldv_serviceprovider";
+    // Mutable control state shared across PCF lifecycle callbacks, asynchronous requests, and renders.
     private activeGenerationId = 0;
     private associatedLegalNoteKeys: Record<string, boolean> = {};
     private assessDisputeComment?: string;
@@ -281,6 +303,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     private suggestionCorrelationId?: string;
     private validationByAI?: number;
     private _container?: HTMLDivElement;
+    // PCF lifecycle ---------------------------------------------------------
+
     /**
      * Empty constructor.
      */
@@ -322,6 +346,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
 
     /**
      * Called when any value in the property bag has changed. This includes field values, data-sets, global values such as container height and width, offline status, control metadata values such as label, visible, etc.
+     * Re-evaluates live gates and persisted review state before rendering the React view.
      * @param context The entire property bag available to control via Context Object; It contains values as set up by the customizer mapped to names defined in the manifest, as well as utility functions
      * @returns ReactElement root react element for the control
      */
@@ -395,6 +420,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
 
     /**
      * It is called by the framework prior to a control receiving new data.
+     * Returns only the packet that should reach bound fields. Review-state fields already saved by
+     * Web API are suppressed to avoid making the model-driven form dirty again.
      * @returns an object based on nomenclature defined in manifest, expecting object[s] for property marked as "bound" or "output"
      */
     public getOutputs(): IOutputs {
@@ -480,6 +507,9 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         }
     }
 
+    // Saved review hydration and cross-tab persistence ---------------------
+
+    /** Loads bound CRM values into memory before asynchronous live-record refreshes complete. */
     private hydrateOutputs(context: ComponentFramework.Context<IInputs>): void {
         this.boundField = context.parameters.BoundField.raw ?? undefined;
         this.decisionByAI = context.parameters.decisionByAI.raw ?? undefined;
@@ -512,6 +542,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.restorePendingSuggestionFromSavedReview(context);
     }
 
+    /** Refreshes reserved recommendation fields directly from Dataverse without overwriting newer local actions. */
     private refreshSavedReviewState(context: ComponentFramework.Context<IInputs>, force = false): void {
         const refreshKey = this.getSavedReviewRefreshKey(context);
 
@@ -944,6 +975,9 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         };
     }
 
+    // Initial-generation state ---------------------------------------------
+
+    /** Tracks the record key used by the dormant first-load generation flow. */
     private getInitialGenerateRecordKey(context: ComponentFramework.Context<IInputs>): string | undefined {
         const contextInfo = this.getContextInfo(context);
         const entityName = contextInfo?.entityTypeName?.trim().toLowerCase();
@@ -984,6 +1018,9 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         });
     }
 
+    // Generation and request execution -------------------------------------
+
+    /** Legacy first-load generation flow retained for reference; its caller is currently disabled. */
     private async tryInitialGenerate(context: ComponentFramework.Context<IInputs>): Promise<void> {
         const hasInitialGenerateStartedForRecord = this.hasInitialGenerateStartedForRecord(context);
 
@@ -1041,6 +1078,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         void this.generateResult(context);
     }
 
+    /** Executes either the configured endpoint call or the local testing-response path. */
     private async generateResult(context: ComponentFramework.Context<IInputs>): Promise<void> {
         const apiEndpoint = this.getApiEndpoint(context);
         const method = this.getMethod(context);
@@ -1220,6 +1258,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         }
     }
 
+    /** Normalizes a successful endpoint or testing response and persists its review preview. */
     private async applyGeneratedPreview(
         responseData: unknown,
         responseText: string,
@@ -1261,6 +1300,9 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.log(`preview suggestion ready from ${source}`, this.toSuggestionLog(suggestion));
     }
 
+    // User review actions ---------------------------------------------------
+
+    /** Applies the recommendation, saves all mapped fields, associates legal notes, and refreshes when allowed. */
     private async acceptPendingResult(context: ComponentFramework.Context<IInputs>): Promise<void> {
         if (!await this.ensureActionAllowed(context, "accept")) {
             return;
@@ -1343,6 +1385,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         }
     }
 
+    /** Applies bound outputs for editing while persisting only the reserved review snapshot and Modified status. */
     private async modifyPendingResult(context: ComponentFramework.Context<IInputs>): Promise<void> {
         if (!await this.ensureActionAllowed(context, "modify")) {
             return;
@@ -1397,6 +1440,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.publishState(context);
     }
 
+    /** Clears or restores operational outputs but keeps the generated recommendation visible as Rejected. */
     private async rejectPendingResult(context: ComponentFramework.Context<IInputs>): Promise<void> {
         if (!await this.ensureActionAllowed(context, "reject")) {
             return;
@@ -1456,6 +1500,9 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.publishState(context);
     }
 
+    // Output mapping, snapshots, and Reject restoration --------------------
+
+    /** Maps one normalized suggestion to operational bound fields according to its decision. */
     private applySuggestionToOutputs(
         suggestion: PendingSuggestion,
         context: ComponentFramework.Context<IInputs>
@@ -1685,6 +1732,12 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.validationByAI = undefined;
     }
 
+    // Agent-comment output sequencing --------------------------------------
+
+    /**
+     * Holds the CRM agent-comment output out of the first notification packet, then replays it.
+     * This accommodates form scripts that overwrite ldv_agentcomment during the first field update.
+     */
     private prepareAgentCommentOutputGate(
         context: ComponentFramework.Context<IInputs>,
         suggestion: PendingSuggestion,
@@ -1845,6 +1898,9 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         }
     }
 
+    // Dataverse persistence -------------------------------------------------
+
+    /** Builds and saves the complete Accept payload before optional legal-note creation. */
     private async saveAcceptedOutputs(
         context: ComponentFramework.Context<IInputs>,
         suggestion: PendingSuggestion
@@ -1882,6 +1938,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         };
     }
 
+    /** Builds the operational and reserved field payload used by Accept. */
     private async buildDataversePayload(
         context: ComponentFramework.Context<IInputs>,
         suggestion: PendingSuggestion
@@ -1962,6 +2019,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         return true;
     }
 
+    /** Persists Generated status and raw response data so the preview survives tabs and reloads. */
     private async saveGeneratedPreviewState(
         context: ComponentFramework.Context<IInputs>,
         suggestion: PendingSuggestion
@@ -2013,6 +2071,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         this.addBoundDateTimeValue(payload, context.parameters.lastRunOn, suggestion.generatedOnDate);
     }
 
+    /** Persists Rejected status, reserved AI values, and explicit operational-field restoration. */
     private async saveRejectedReviewState(
         context: ComponentFramework.Context<IInputs>,
         rejectOutputPacket: RejectOutputPacket | undefined
@@ -2139,6 +2198,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         }
     }
 
+    /** Stores the live service-status/count pair after an eligible generated preview completes. */
     private async saveAutoGenerationMarkerIfNeeded(
         context: ComponentFramework.Context<IInputs>
     ): Promise<boolean> {
@@ -2255,6 +2315,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             this.addBoundTextValue(payload, context.parameters.escalateToLeadComment, this.escalateToLeadComment);
         }
     }
+
+    // PCF output emission and diagnostics ----------------------------------
 
     private addOutput<TKey extends keyof IOutputs>(
         outputs: IOutputs,
@@ -2475,6 +2537,9 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         return textValue.length > 120 ? `${textValue.slice(0, 120)}...` : textValue;
     }
 
+    // Legal-note creation and association ----------------------------------
+
+    /** Creates returned legal-note hierarchies only for eligible Assess Dispute recommendations. */
     private async associateLegalNotesToCurrentRecord(
         context: ComponentFramework.Context<IInputs>,
         suggestion: PendingSuggestion
@@ -2597,6 +2662,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
 
         return payload;
     }
+
+    // Bound-field payload helpers and Dataverse metadata -------------------
 
     private addBoundTextValue(
         payload: ComponentFramework.WebApi.Entity,
@@ -2989,6 +3056,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         return "Accepted. Suggested fields were saved to the Case.";
     }
 
+    // Request construction and prompt inputs -------------------------------
+
     private buildBody(context: ComponentFramework.Context<IInputs>, identifiers: RequestIdentifiers): string | undefined {
         const method = this.getMethod(context);
 
@@ -3196,6 +3265,9 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         return context.parameters.providerResponse.raw?.trim() ?? "";
     }
 
+    // Service-provider global option-set metadata --------------------------
+
+    /** Loads labels from the on-premises global option set when the bound field has no formatted value. */
     private async ensureServiceProviderOptionLabels(
         context: ComponentFramework.Context<IInputs>
     ): Promise<Record<number, string> | undefined> {
@@ -3299,6 +3371,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
 
         return urls;
     }
+
+    // Manifest configuration readers ---------------------------------------
 
     private getIsDevelopment(context: ComponentFramework.Context<IInputs>): boolean {
         const parameters = context.parameters as IInputs & Record<string, { raw?: unknown } | undefined>;
@@ -3465,6 +3539,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         ].join("|");
     }
 
+    // BPF stage gate --------------------------------------------------------
+
     private async refreshBpfGate(context: ComponentFramework.Context<IInputs>, force = false): Promise<boolean> {
         if (!this.getIsBpfHandled(context)) {
             this.isBpfDisabled = false;
@@ -3590,6 +3666,9 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         });
     }
 
+    // Service-status auto generation ---------------------------------------
+
+    /** Reads live CRM status and marker fields before starting at most one generation per route count. */
     private requestServiceStatusAutoGenerate(context: ComponentFramework.Context<IInputs>): void {
         const checkKey = this.getServiceStatusAutoGenerationCheckKey(context);
 
@@ -3735,6 +3814,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         ].join("|").toLowerCase();
     }
 
+    /** Reads current and last-processed route values together to avoid stale bound parameters. */
     private async retrieveServiceStatusAutoGenerationState(
         context: ComponentFramework.Context<IInputs>
     ): Promise<ServiceStatusAutoGenerationState> {
@@ -3869,6 +3949,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
     }
 
     // Reason: missing and unknown decisions cannot safely populate the Case. Change: share numeric option validation between the view and review handlers, with an optional Reject exemption.
+    // Review validation and record access gates ----------------------------
+
     private getInvalidDecisionDisabledReason(
         context: ComponentFramework.Context<IInputs>,
         actionName: "accept" | "modify" | "reject"
@@ -4052,6 +4134,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
 
         return this.cleanGuid(userSettings.userId ?? "");
     }
+
+    // AI lookup conversion and control availability ------------------------
 
     private readLookupOutput(value: unknown): ComponentFramework.LookupValue[] | undefined {
         if (!Array.isArray(value) || value.length === 0) {
@@ -4304,6 +4388,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         return false;
     }
 
+    // Generic request templates and response normalization -----------------
+
     private buildRequestKey(context: ComponentFramework.Context<IInputs>): string {
         return [
             this.getApiEndpoint(context),
@@ -4384,6 +4470,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         );
     }
 
+    /** Unwraps a standard response envelope and produces the pending normalized review model. */
     private buildPendingSuggestion(
         responseData: unknown,
         responseText: string,
@@ -4453,6 +4540,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         ]) ?? "The AI needs more information before it can generate a reliable recommendation.";
     }
 
+    /** Accepts the supported response aliases and maps them into one stable UI/output model. */
     private normalizeSuggestion(data: unknown): AdvisorSuggestionViewModel {
         const candidate = this.getSuggestionCandidate(data);
         const legalNotes = this.readLegalNotes(candidate);
@@ -4594,6 +4682,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         };
     }
 
+    /** Merges an embedded OutputResult object over the outer custom-action response when present. */
     private getSuggestionCandidate(data: unknown): unknown {
         const outputResult = this.parseJsonObject(this.readJsonPath(data, "OutputResult"))
             ?? this.parseJsonObject(this.readJsonPath(data, "outputResult"));
@@ -4620,6 +4709,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         return candidate;
     }
 
+    /** Reads only top-level recommendation legal notes and intentionally ignores matched-case notes. */
     private readLegalNotes(...candidates: unknown[]): LegalNoteViewModel[] {
         const legalNotePaths = [
             "LegalNotesJson",
@@ -4821,6 +4911,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             name
         };
     }
+
+    // Response, option-set, and form-refresh helpers ------------------------
 
     private getContextInfo(context: ComponentFramework.Context<IInputs>): ContextInfo | undefined {
         return (
@@ -5084,6 +5176,7 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
         return clientUrl?.replace(/\/$/, "");
     }
 
+    /** Uses legacy Xrm.Page refresh only for the explicitly requested post-save flow. */
     private async tryUnsupportedFormRefresh(
         context: ComponentFramework.Context<IInputs>,
         actionName: string,
@@ -5155,6 +5248,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             return undefined;
         }
     }
+
+    // Generic JSON and decision helpers ------------------------------------
 
     private isPromiseLike(value: unknown): value is PromiseLike<void> {
         return typeof value === "object"
@@ -5459,6 +5554,8 @@ export class ApiFieldMapper implements ComponentFramework.StandardControl<IInput
             suggestion.suggestedDecision
         ].find((value) => Boolean(value))?.toLowerCase();
     }
+
+    // Primitive readers, identifiers, rendering, and development logging ---
 
     private readNumber(data: unknown, paths: string[]): number | undefined {
         for (const path of paths) {

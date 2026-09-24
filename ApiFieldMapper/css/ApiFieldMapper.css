@@ -1,3 +1,9 @@
+/*
+ * Reason: the stylesheet covers several independent UI regions without visual navigation markers.
+ * Change: group the existing rules by function so styling can be maintained without altering layout or values.
+ */
+
+/* Control shell and disabled state */
 .ai-advisor {
   background: #f3f8ff;
   border: 1px solid #9cc4ff;
@@ -28,6 +34,7 @@
   opacity: 0.62;
 }
 
+/* Header, title, stage information, and status badges */
 .ai-advisor__header,
 .ai-advisor__footer,
 .ai-advisor__title,
@@ -210,6 +217,7 @@
   width: 14px;
 }
 
+/* Recommendation sections, warning notice, and two-column field layout */
 .ai-advisor__section {
   background: rgba(255, 255, 255, 0.55);
   border: 1px solid #c7dcfb;
@@ -330,6 +338,7 @@
   gap: 8px;
 }
 
+/* Review actions, tooltips, and transient action status */
 .ai-advisor__actions {
   align-items: center;
   background: rgba(255, 255, 255, 0.72);
@@ -529,6 +538,7 @@
   width: 14px;
 }
 
+/* Loading and status animations */
 @keyframes ai-advisor-spin {
   to {
     transform: rotate(360deg);
@@ -546,6 +556,7 @@
   }
 }
 
+/* Legal-note hierarchy cards */
 .ai-advisor__legal-note-grid {
   display: grid;
   gap: 8px;
@@ -633,6 +644,7 @@
   font-family: Consolas, "Courier New", monospace;
 }
 
+/* Error and development-only raw response panels */
 .ai-advisor__error {
   background: #fff4f4;
   border: 1px solid #eeacb2;
@@ -658,6 +670,7 @@
   word-break: break-word;
 }
 
+/* Compact form-column layout */
 @media (max-width: 520px) {
   .ai-advisor__header,
   .ai-advisor__row {
